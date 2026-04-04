@@ -249,6 +249,11 @@
     max-width: 300px;
     text-align: left;
 }
+.advanced-upload {
+    width: 100%;
+    font-size: 0.72em;
+    color: #ddd;
+}
 .option-row {
     margin-bottom: 10px;
     display: flex;
@@ -419,7 +424,27 @@
             <span class="option-label">Neon Effects</span>
             <button class="switch-btn" id="neon-toggle-btn" onclick="toggleNeonEnabled()"></button>
         </div>
+        <div class="option-row">
+            <span class="option-label">Advanced</span>
+            <button class="switch-btn active" onclick="openAdvancedOptions()">Open Advanced Options</button>
+        </div>
         <button onclick="closeOptions()">Close</button>
+    </div>
+</div>
+<div id="advanced-options-modal" class="modal">
+    <div class="modal-content" style="max-width:520px; border-color:var(--gold);">
+        <h2 style="margin-top:0; color:var(--gold);">Advanced Options</h2>
+        <div class="option-row"><span class="option-label">Snake Head</span><input class="advanced-upload" type="file" accept="image/*" onchange="uploadCustomSkinPart('head', event)"></div>
+        <div class="option-row"><span class="option-label">Snake Body</span><input class="advanced-upload" type="file" accept="image/*" onchange="uploadCustomSkinPart('body', event)"></div>
+        <div class="option-row"><span class="option-label">Snake Tail</span><input class="advanced-upload" type="file" accept="image/*" onchange="uploadCustomSkinPart('tail', event)"></div>
+        <div class="option-row"><span class="option-label">Music</span><input class="advanced-upload" type="file" accept="audio/*" onchange="uploadCustomMusic(event)"></div>
+        <div class="option-row"><span class="option-label">Playfield BG</span><input class="advanced-upload" type="file" accept="image/*" onchange="uploadCustomBackground(event)"></div>
+        <div class="option-row">
+            <button class="switch-btn" onclick="useUploadedSkin()">Use Uploaded Skin</button>
+            <button class="switch-btn" onclick="clearCustomMusic()">Reset Music</button>
+            <button class="switch-btn" onclick="clearCustomBackground()">Reset BG</button>
+        </div>
+        <button onclick="closeAdvancedOptions()">Close</button>
     </div>
 </div>
   </div>
@@ -723,7 +748,12 @@
         musicEnabled: true, neonEnabled: true,
         controlPreset: 'arrows',
         customControls: { left: 'j', up: 'i', right: 'l', down: 'k' },
-        phaseKey: 'space'
+        phaseKey: 'space',
+        customSkinHead: '',
+        customSkinBody: '',
+        customSkinTail: '',
+        customMusic: '',
+        customGameBackground: ''
     };
     let data = Object.assign({}, defaultSaveData, JSON.parse(localStorage.getItem('Snake_2026_SoulReveal')) || {});
     if (!Array.isArray(data.owned)) data.owned = ['#00fbff'];
@@ -737,6 +767,11 @@
     if (typeof data.musicEnabled !== 'boolean') data.musicEnabled = true;
     if (typeof data.neonEnabled !== 'boolean') data.neonEnabled = true;
     if (!data.phaseKey) data.phaseKey = 'space';
+
+    if (data.customSkinHead) snakeImageSkinAssets.head.src = data.customSkinHead;
+    if (data.customSkinBody) snakeImageSkinAssets.body.src = data.customSkinBody;
+    if (data.customSkinTail) snakeImageSkinAssets.tail.src = data.customSkinTail;
+    if (data.customMusic) defaultMusic.src = data.customMusic;
 
     function normalizeControlValue(value) {
         return String(value || '').trim().toLowerCase().replace(/\s+/g, ' ').slice(0, 12);
@@ -773,6 +808,7 @@
         return presets[data.controlPreset] || presets.arrows;
     }
     applyNeonPreference();
+    applyGameBackground();
 
     function save() { localStorage.setItem('Snake_2026_SoulReveal', JSON.stringify(data)); }
     window.startGame = function () {
@@ -1770,6 +1806,89 @@ function openOptions() {
 function closeOptions() {
     modalActive = false;
     document.getElementById("options-modal").style.display = "none";
+    closeAdvancedOptions();
+}
+
+function openAdvancedOptions() {
+    document.getElementById("advanced-options-modal").style.display = "flex";
+}
+
+function closeAdvancedOptions() {
+    document.getElementById("advanced-options-modal").style.display = "none";
+}
+
+function readFileAsDataURL(file, onLoad) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => onLoad(reader.result || '');
+    reader.readAsDataURL(file);
+}
+
+function uploadCustomSkinPart(part, event) {
+    const file = event && event.target && event.target.files ? event.target.files[0] : null;
+    readFileAsDataURL(file, (dataUrl) => {
+        const key = `customSkin${part.charAt(0).toUpperCase() + part.slice(1)}`;
+        data[key] = dataUrl;
+        if (snakeImageSkinAssets[part]) snakeImageSkinAssets[part].src = dataUrl;
+        if (!data.owned.includes(IMAGE_SKIN_ID)) data.owned.push(IMAGE_SKIN_ID);
+        save();
+    });
+}
+
+function useUploadedSkin() {
+    if (!data.customSkinHead && !data.customSkinBody && !data.customSkinTail) return alert('Upload at least one custom skin image first.');
+    if (!data.owned.includes(IMAGE_SKIN_ID)) data.owned.push(IMAGE_SKIN_ID);
+    data.skin = IMAGE_SKIN_ID;
+    save();
+    updateUI();
+}
+
+function uploadCustomMusic(event) {
+    const file = event && event.target && event.target.files ? event.target.files[0] : null;
+    readFileAsDataURL(file, (dataUrl) => {
+        data.customMusic = dataUrl;
+        defaultMusic.src = dataUrl;
+        defaultMusic.currentTime = 0;
+        if (!modalActive && !isPaused && data.musicEnabled) playDefaultMusic();
+        save();
+    });
+}
+
+function clearCustomMusic() {
+    data.customMusic = '';
+    defaultMusic.src = "https://codehs.com/uploads/0d78da48c3e737d0555b5a3767a52f83";
+    defaultMusic.currentTime = 0;
+    if (!modalActive && !isPaused && data.musicEnabled) playDefaultMusic();
+    save();
+}
+
+function applyGameBackground() {
+    const gameContainer = document.getElementById('game-container');
+    if (!gameContainer) return;
+    if (data.customGameBackground) {
+        gameContainer.style.backgroundImage = `url('${data.customGameBackground}')`;
+        gameContainer.style.backgroundSize = 'cover';
+        gameContainer.style.backgroundPosition = 'center';
+    } else {
+        gameContainer.style.backgroundImage = 'none';
+        gameContainer.style.backgroundSize = '';
+        gameContainer.style.backgroundPosition = '';
+    }
+}
+
+function uploadCustomBackground(event) {
+    const file = event && event.target && event.target.files ? event.target.files[0] : null;
+    readFileAsDataURL(file, (dataUrl) => {
+        data.customGameBackground = dataUrl;
+        applyGameBackground();
+        save();
+    });
+}
+
+function clearCustomBackground() {
+    data.customGameBackground = '';
+    applyGameBackground();
+    save();
 }
 
 function setControlPreset(preset) {
