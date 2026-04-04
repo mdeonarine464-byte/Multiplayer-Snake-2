@@ -465,7 +465,7 @@
 <div id="ending-overlay" onclick="handleEndingAdvanceClick()">
     <div id="ending-overlay-content">
         <p id="ending-overlay-text"></p>
-        <p id="ending-overlay-prompt">Click to continue to credits</p>
+        <p id="ending-overlay-prompt">Click to continue</p>
     </div>
 </div>
 
@@ -1398,15 +1398,15 @@ if (endingActive) return;
 endingActive = true;
 
 if (data.cheatActive === true) {
-    beginEndingSequence("CHEATER CHEATER PUMKIN EATER!");
+    beginEndingSequence("Cheater ending unlocked: no glory for shortcuts.");
 } else if (data.cardLinked === true){
     data.endingHellUnlocked = true;
     save();
-    beginEndingSequence("HELL ENDING HERE!");
+    beginEndingSequence("Hell ending unlocked: the serpent descends.");
 } else {
     data.endingAverageUnlocked = true;
     save();
-    beginEndingSequence("You win! Reload imminent!");
+    beginEndingSequence("Average ending unlocked: the cycle begins again.");
 }
 }
 
