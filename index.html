@@ -1989,22 +1989,12 @@ function isSkinRequirementMet(requirement) {
 function openCredits(endingText = "Thanks for playing Snake 2.") {
     const textEl = document.getElementById("credits-ending-text");
     if (textEl) textEl.innerText = endingText;
-    document.getElementById("credits-modal").style.display = "flex";
-}
 
-function closeCredits() {
-    if (endingActive) {
-        location.reload();
-        return;
-    }
-    document.getElementById("credits-modal").style.display = "none";
-    modalActive = false;
-}
+    const modal = document.getElementById("credits-modal");
+    if (modal) modal.style.display = "flex";
 
-function startCredits(endingText) {
     isPaused = true;
     modalActive = true;
-    openCredits(endingText);
 
     const roll = document.getElementById("credits-roll");
     if (roll) {
@@ -2017,6 +2007,30 @@ function startCredits(endingText) {
     endingMusic.pause();
     creditsMusic.currentTime = 0;
     if (data.musicEnabled) creditsMusic.play().catch(() => {});
+}
+
+function closeCredits() {
+    if (endingActive) {
+        location.reload();
+        return;
+    }
+
+    const modal = document.getElementById("credits-modal");
+    if (modal) modal.style.display = "none";
+
+    modalActive = false;
+
+    if (!titleActive) {
+        isPaused = false;
+    }
+
+    creditsMusic.pause();
+    creditsMusic.currentTime = 0;
+    if (!titleActive && data.musicEnabled) playDefaultMusic();
+}
+
+function startCredits(endingText) {
+    openCredits(endingText);
 }
     function buyBuff(type) {
   if (type === 'speed' && data.gems >= 500) {
