@@ -249,6 +249,11 @@
     max-width: 300px;
     text-align: left;
 }
+.advanced-upload {
+    width: 100%;
+    font-size: 0.72em;
+    color: #ddd;
+}
 .option-row {
     margin-bottom: 10px;
     display: flex;
@@ -419,7 +424,32 @@
             <span class="option-label">Neon Effects</span>
             <button class="switch-btn" id="neon-toggle-btn" onclick="toggleNeonEnabled()"></button>
         </div>
+        <div class="option-row">
+            <span class="option-label">Advanced</span>
+            <button class="switch-btn active" onclick="openAdvancedOptions()">Open Advanced Options</button>
+        </div>
         <button onclick="closeOptions()">Close</button>
+    </div>
+</div>
+<div id="advanced-options-modal" class="modal">
+    <div class="modal-content" style="max-width:520px; border-color:var(--gold);">
+        <h2 style="margin-top:0; color:var(--gold);">Advanced Options</h2>
+        <div class="option-row"><span class="option-label">Snake Head</span><input class="advanced-upload" type="file" accept="image/*" onchange="uploadCustomSkinPart('head', event)"></div>
+        <div class="option-row"><span class="option-label">Snake Body</span><input class="advanced-upload" type="file" accept="image/*" onchange="uploadCustomSkinPart('body', event)"></div>
+        <div class="option-row"><span class="option-label">Snake Tail</span><input class="advanced-upload" type="file" accept="image/*" onchange="uploadCustomSkinPart('tail', event)"></div>
+        <div class="option-row"><span class="option-label">Music</span><input class="advanced-upload" type="file" accept="audio/*" onchange="uploadCustomMusic(event)"></div>
+        <div class="option-row"><span class="option-label">Playfield BG</span><input class="advanced-upload" type="file" accept="image/*" onchange="uploadCustomBackground(event)"></div>
+        <div class="option-row">
+            <span class="option-label">Growth Style</span>
+            <button class="switch-btn" id="growth-tail-btn" onclick="setGrowthMode('tail')">Tail Growth</button>
+            <button class="switch-btn" id="growth-body-btn" onclick="setGrowthMode('body')">Body Growth</button>
+        </div>
+        <div class="option-row">
+            <button class="switch-btn" onclick="useUploadedSkin()">Use Uploaded Skin</button>
+            <button class="switch-btn" onclick="clearCustomMusic()">Reset Music</button>
+            <button class="switch-btn" onclick="clearCustomBackground()">Reset BG</button>
+        </div>
+        <button onclick="closeAdvancedOptions()">Close</button>
     </div>
 </div>
   </div>
@@ -653,26 +683,17 @@
     creditsMusic.volume = 0.75;
     let endingTriggered = false;
     let endingActive = false;
-<<<<<<< codex/add-images-to-shop-skin-uc3aux
-=======
     let endingAwaitingClick = false;
     let queuedEndingText = "Thanks for playing Snake 2.";
->>>>>>> main
     const IMAGE_SKIN_ID = 'triple-image';
     const snakeImageSkinAssets = {
         head: new Image(),
         body: new Image(),
         tail: new Image()
     };
-<<<<<<< codex/add-images-to-shop-skin-uc3aux
-    snakeImageSkinAssets.head.src = 'snakehead.jpg';
-    snakeImageSkinAssets.body.src = 'snakebody.jpg';
-    snakeImageSkinAssets.tail.src = 'snaketail.jpg';
-=======
     snakeImageSkinAssets.head.src = 'https://codehs.com/uploads/7ede088a2b8e13004598196b57c8ea42';
     snakeImageSkinAssets.body.src = 'https://codehs.com/uploads/39c867b57d8cf23c0094d7fb3de37db7';
     snakeImageSkinAssets.tail.src = 'https://codehs.com/uploads/7db8b7ebaf3e37439adf04a3145b0de1';
->>>>>>> main
 
     function playDefaultMusic() {
         if (!data.musicEnabled) return;
@@ -732,7 +753,13 @@
         musicEnabled: true, neonEnabled: true,
         controlPreset: 'arrows',
         customControls: { left: 'j', up: 'i', right: 'l', down: 'k' },
-        phaseKey: 'space'
+        phaseKey: 'space',
+        customSkinHead: '',
+        customSkinBody: '',
+        customSkinTail: '',
+        customMusic: '',
+        customGameBackground: '',
+        growthMode: 'tail'
     };
     let data = Object.assign({}, defaultSaveData, JSON.parse(localStorage.getItem('Snake_2026_SoulReveal')) || {});
     if (!Array.isArray(data.owned)) data.owned = ['#00fbff'];
@@ -746,6 +773,12 @@
     if (typeof data.musicEnabled !== 'boolean') data.musicEnabled = true;
     if (typeof data.neonEnabled !== 'boolean') data.neonEnabled = true;
     if (!data.phaseKey) data.phaseKey = 'space';
+    if (data.growthMode !== 'tail' && data.growthMode !== 'body') data.growthMode = 'tail';
+
+    if (data.customSkinHead) snakeImageSkinAssets.head.src = data.customSkinHead;
+    if (data.customSkinBody) snakeImageSkinAssets.body.src = data.customSkinBody;
+    if (data.customSkinTail) snakeImageSkinAssets.tail.src = data.customSkinTail;
+    if (data.customMusic) defaultMusic.src = data.customMusic;
 
     function normalizeControlValue(value) {
         return String(value || '').trim().toLowerCase().replace(/\s+/g, ' ').slice(0, 12);
@@ -782,6 +815,7 @@
         return presets[data.controlPreset] || presets.arrows;
     }
     applyNeonPreference();
+    applyGameBackground();
 
     function save() { localStorage.setItem('Snake_2026_SoulReveal', JSON.stringify(data)); }
     window.startGame = function () {
@@ -1473,7 +1507,6 @@ function drawPatternedSnakeSegment(segment, isHead = false) {
   const py = segment.y * grid + 1;
   const size = grid - 2;
   const isImageSkin = data.skin === IMAGE_SKIN_ID;
-<<<<<<< codex/add-images-to-shop-skin-uc3aux
   const baseColor = getActiveSnakeColor();
   const sharedRotation = getSnakeImageRotation();
 
@@ -1481,17 +1514,6 @@ function drawPatternedSnakeSegment(segment, isHead = false) {
     const img = isHead ? snakeImageSkinAssets.head : snakeImageSkinAssets.body;
     if (img && img.complete && img.naturalWidth > 0) {
       drawRotatedSnakeImage(img, px, py, size, sharedRotation);
-      return;
-    }
-  }
-=======
-  const baseColor = cheatActive ? '#013220' : (isSnakeHexColor(data.skin) ? data.skin : '#00fbff');
->>>>>>> main
-
-  if (isImageSkin && !isPhasing && !cheatActive) {
-    const img = isHead ? snakeImageSkinAssets.head : snakeImageSkinAssets.body;
-    if (img && img.complete && img.naturalWidth > 0) {
-      ctx.drawImage(img, px, py, size, size);
       return;
     }
   }
@@ -1543,7 +1565,6 @@ function drawTailSegmentImage(segment) {
   const size = grid - 2;
   const img = snakeImageSkinAssets.tail;
   if (img && img.complete && img.naturalWidth > 0) {
-<<<<<<< codex/add-images-to-shop-skin-uc3aux
     drawRotatedSnakeImage(img, px, py, size, getSnakeImageRotation());
     return true;
   }
@@ -1557,9 +1578,6 @@ function drawBodySegmentImage(segment) {
   const img = snakeImageSkinAssets.body;
   if (img && img.complete && img.naturalWidth > 0) {
     drawRotatedSnakeImage(img, px, py, size, getSnakeImageRotation());
-=======
-    ctx.drawImage(img, px, py, size, size);
->>>>>>> main
     return true;
   }
   return false;
@@ -1569,7 +1587,6 @@ function isSnakeHexColor(value) {
   return /^#[0-9a-fA-F]{6}$/.test((value || '').trim());
 }
 
-<<<<<<< codex/add-images-to-shop-skin-uc3aux
 function getActiveSnakeColor() {
   if (cheatActive) return '#013220';
   return isSnakeHexColor(data.skin) ? data.skin : '#00fbff';
@@ -1591,12 +1608,6 @@ function getSnakeImageRotation() {
   if (dx === -1 && dy === 0) return Math.PI;
   if (dx === 0 && dy === -1) return -Math.PI / 2;
   return 0;
-=======
-function getSkinNeonColor() {
-  if (cheatActive) return '#013220';
-  if (isSnakeHexColor(data.skin)) return data.skin;
-  return '#00fbff';
->>>>>>> main
 }
 
 function resetPhasePremonitionPreview() {
@@ -1776,6 +1787,10 @@ function updateOptionButtons() {
     }
     const customRow = document.getElementById('custom-control-row');
     if (customRow) customRow.style.opacity = data.controlPreset === 'custom' ? '1' : '0.55';
+    const growthTailBtn = document.getElementById('growth-tail-btn');
+    const growthBodyBtn = document.getElementById('growth-body-btn');
+    if (growthTailBtn) growthTailBtn.classList.toggle('active', data.growthMode === 'tail');
+    if (growthBodyBtn) growthBodyBtn.classList.toggle('active', data.growthMode === 'body');
 }
 
 function fillCustomControlsUI() {
@@ -1802,6 +1817,95 @@ function openOptions() {
 function closeOptions() {
     modalActive = false;
     document.getElementById("options-modal").style.display = "none";
+    closeAdvancedOptions();
+}
+
+function openAdvancedOptions() {
+    document.getElementById("advanced-options-modal").style.display = "flex";
+}
+
+function closeAdvancedOptions() {
+    document.getElementById("advanced-options-modal").style.display = "none";
+}
+
+function readFileAsDataURL(file, onLoad) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => onLoad(reader.result || '');
+    reader.readAsDataURL(file);
+}
+
+function uploadCustomSkinPart(part, event) {
+    const file = event && event.target && event.target.files ? event.target.files[0] : null;
+    readFileAsDataURL(file, (dataUrl) => {
+        const key = `customSkin${part.charAt(0).toUpperCase() + part.slice(1)}`;
+        data[key] = dataUrl;
+        if (snakeImageSkinAssets[part]) snakeImageSkinAssets[part].src = dataUrl;
+        save();
+    });
+}
+
+function useUploadedSkin() {
+    if (!data.customSkinHead && !data.customSkinBody && !data.customSkinTail) return alert('Upload at least one custom skin image first.');
+    if (!data.owned.includes(IMAGE_SKIN_ID)) return alert('Buy the image skin in the shop first (30k).');
+    data.skin = IMAGE_SKIN_ID;
+    save();
+    updateUI();
+}
+
+function uploadCustomMusic(event) {
+    const file = event && event.target && event.target.files ? event.target.files[0] : null;
+    readFileAsDataURL(file, (dataUrl) => {
+        data.customMusic = dataUrl;
+        defaultMusic.src = dataUrl;
+        defaultMusic.currentTime = 0;
+        if (!modalActive && !isPaused && data.musicEnabled) playDefaultMusic();
+        save();
+    });
+}
+
+function clearCustomMusic() {
+    data.customMusic = '';
+    defaultMusic.src = "https://codehs.com/uploads/0d78da48c3e737d0555b5a3767a52f83";
+    defaultMusic.currentTime = 0;
+    if (!modalActive && !isPaused && data.musicEnabled) playDefaultMusic();
+    save();
+}
+
+function applyGameBackground() {
+    const gameContainer = document.getElementById('game-container');
+    if (!gameContainer) return;
+    if (data.customGameBackground) {
+        gameContainer.style.backgroundImage = `url('${data.customGameBackground}')`;
+        gameContainer.style.backgroundSize = 'cover';
+        gameContainer.style.backgroundPosition = 'center';
+    } else {
+        gameContainer.style.backgroundImage = 'none';
+        gameContainer.style.backgroundSize = '';
+        gameContainer.style.backgroundPosition = '';
+    }
+}
+
+function uploadCustomBackground(event) {
+    const file = event && event.target && event.target.files ? event.target.files[0] : null;
+    readFileAsDataURL(file, (dataUrl) => {
+        data.customGameBackground = dataUrl;
+        applyGameBackground();
+        save();
+    });
+}
+
+function clearCustomBackground() {
+    data.customGameBackground = '';
+    applyGameBackground();
+    save();
+}
+
+function setGrowthMode(mode) {
+    if (mode !== 'tail' && mode !== 'body') return;
+    data.growthMode = mode;
+    save();
+    updateOptionButtons();
 }
 
 function setControlPreset(preset) {
@@ -2621,8 +2725,14 @@ if (appleMoveTick >= appleMoveRate) {
                 applyAppleRewards(2, true);
                 if (data.exp >= data.nxt) { data.lvl++; data.sp++; data.xpM += 0.2; data.exp = 0; data.nxt *= 1.10; }
                 save(); updateUI();
-            } else if (growCount > 0) growCount--;
-            else snake.pop();
+            } else if (growCount > 0) {
+                growCount--;
+                if (data.growthMode === 'body' && snake.length > 2) {
+                    const neck = snake[1];
+                    snake.splice(1, 0, { x: neck.x, y: neck.y });
+                    snake.pop();
+                }
+            } else snake.pop();
         }
         
         ctx.fillStyle = "black"; ctx.fillRect(0,0,400,400);
@@ -2672,9 +2782,10 @@ if (appleMoveTick >= appleMoveRate) {
         }
         
         // Visuals
-<<<<<<< codex/add-images-to-shop-skin-uc3aux
-        if (data.owned.indexOf(data.skin) >= 3 || isPhasing || cheatActive) { particles.push({x: snake[0].x*grid+10, y: snake[0].y*grid+10, life: 1, c: isPhasing ? "white" : getActiveSnakeColor()}); }
-        particles = particles.filter(p => { p.life -= 0.1; ctx.globalAlpha = p.life; ctx.fillStyle = p.c; ctx.beginPath(); ctx.arc(p.x, p.y, 5, 0, Math.PI*2); ctx.fill(); return p.life > 0; });
+        if (data.neonEnabled && (data.owned.indexOf(data.skin) >= 3 || isPhasing || cheatActive)) { particles.push({x: snake[0].x*grid+10, y: snake[0].y*grid+10, life: 1, c: isPhasing ? "white" : getActiveSnakeColor()}); }
+        particles = data.neonEnabled
+            ? particles.filter(p => { p.life -= 0.1; ctx.globalAlpha = p.life; ctx.fillStyle = p.c; ctx.beginPath(); ctx.arc(p.x, p.y, 5, 0, Math.PI*2); ctx.fill(); return p.life > 0; })
+            : [];
         ctx.globalAlpha = 1;
         snake.forEach((s, i) => {
             if (isPhasing) ctx.globalAlpha = 0.5;
@@ -2687,18 +2798,6 @@ if (appleMoveTick >= appleMoveRate) {
                 } else {
                     if (!drawBodySegmentImage(s)) drawPatternedSnakeSegment(s, false);
                 }
-=======
-        if (data.neonEnabled && (data.owned.indexOf(data.skin) >= 3 || isPhasing || cheatActive)) { particles.push({x: snake[0].x*grid+10, y: snake[0].y*grid+10, life: 1, c: isPhasing ? "white" : (cheatActive ? '#013220' : data.skin)}); }
-        particles = data.neonEnabled
-            ? particles.filter(p => { p.life -= 0.1; ctx.globalAlpha = p.life; ctx.fillStyle = p.c; ctx.beginPath(); ctx.arc(p.x, p.y, 5, 0, Math.PI*2); ctx.fill(); return p.life > 0; })
-            : [];
-        ctx.globalAlpha = 1;
-        snake.forEach((s, i) => {
-            if (isPhasing) ctx.globalAlpha = 0.5;
-            const isTail = i === snake.length - 1;
-            if (data.skin === IMAGE_SKIN_ID && !isPhasing && !cheatActive && isTail) {
-                if (!drawTailSegmentImage(s)) drawPatternedSnakeSegment(s, i === 0);
->>>>>>> main
             } else {
                 drawPatternedSnakeSegment(s, i === 0);
             }
