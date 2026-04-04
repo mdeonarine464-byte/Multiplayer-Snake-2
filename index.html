@@ -780,6 +780,11 @@
     if (data.customSkinTail) snakeImageSkinAssets.tail.src = data.customSkinTail;
     if (data.customMusic) defaultMusic.src = data.customMusic;
 
+    if (data.customSkinHead) snakeImageSkinAssets.head.src = data.customSkinHead;
+    if (data.customSkinBody) snakeImageSkinAssets.body.src = data.customSkinBody;
+    if (data.customSkinTail) snakeImageSkinAssets.tail.src = data.customSkinTail;
+    if (data.customMusic) defaultMusic.src = data.customMusic;
+
     function normalizeControlValue(value) {
         return String(value || '').trim().toLowerCase().replace(/\s+/g, ' ').slice(0, 12);
     }
