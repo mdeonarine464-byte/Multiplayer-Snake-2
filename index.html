@@ -713,6 +713,8 @@
     }
 
     function beginEndingSequence(endingText) {
+        clearTimeout(phaseTimeout);
+        clearTimeout(phaseCooldownTimer);
         isPaused = true;
         modalActive = true;
         playEndingMusic();
