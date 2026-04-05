@@ -1,589 +1,1919 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Snake 2: Multiplayer Arena</title>
-  <style>
-    :root {
-      --gold: #ffd700;
-      --premium: #00fbff;
-      --dark: #080808;
-      --xp: #4ecca3;
-      --pink: #ff00ff;
-      --soul: #a020f0;
-      --white: #ffffff;
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      min-height: 100vh;
-      font-family: 'Segoe UI', sans-serif;
-      color: var(--white);
-      background: radial-gradient(circle at 20% 20%, #161616, #040404 70%);
-      display: grid;
-      place-items: center;
-      padding: 20px;
-    }
-    .app {
-      width: min(1100px, 96vw);
-      background: #111;
-      border: 2px solid #2f2f2f;
-      border-radius: 18px;
-      padding: 16px;
-      box-shadow: 0 0 18px rgba(0, 251, 255, 0.15);
-      display: grid;
-      grid-template-columns: 1fr 390px;
-      gap: 16px;
-    }
-    .arena-wrap { position: relative; }
-    canvas {
-      width: 100%;
-      aspect-ratio: 1;
-      background: #000;
-      border: 4px solid #222;
-      border-radius: 10px;
-      image-rendering: pixelated;
-    }
-    .overlay {
-      position: absolute;
-      inset: 0;
-      display: grid;
-      place-items: center;
-      background: rgba(0,0,0,.7);
-      text-align: center;
-      border-radius: 10px;
-      padding: 18px;
-    }
-    .overlay h2 { margin: 0 0 10px; color: var(--premium); }
-    .sidebar { display: grid; gap: 10px; align-content: start; }
-    .panel {
-      background: #151515;
-      border-left: 4px solid var(--premium);
-      border-radius: 10px;
-      padding: 10px;
-    }
-    h1 { margin: 0; font-size: 1.4rem; color: var(--premium); text-shadow: 0 0 10px rgba(0,251,255,.55); }
-    h3 { margin: 4px 0 8px; font-size: .9rem; color: #ddd; }
-    .row { display: flex; gap: 8px; align-items: center; }
-    .row > * { flex: 1; }
-    button, select, input, textarea {
-      background: #101010;
-      color: #fff;
-      border: 1px solid #3a3a3a;
-      border-radius: 6px;
-      padding: 8px;
-      font: inherit;
-    }
-    button { cursor: pointer; }
-    button:hover { border-color: var(--gold); }
-    .tiny { font-size: .78rem; color: #b8b8b8; }
-    .kbd { color: var(--gold); font-weight: 700; }
-    .players { display: grid; gap: 8px; }
-    .player-card { border: 1px solid #333; border-radius: 8px; padding: 8px; background: #111; }
-    .scoreboard { max-height: 205px; overflow: auto; display: grid; gap: 6px; }
-    .score-row {
-      border: 1px solid #2f2f2f;
-      border-left: 4px solid var(--premium);
-      border-radius: 6px;
-      padding: 6px;
-      font-size: .85rem;
-      display: grid;
-      grid-template-columns: 1.1fr repeat(4, .8fr);
-      gap: 4px;
-      align-items: center;
-    }
-    .legend { font-size: .75rem; color: #aaa; line-height: 1.35; }
-    .menu {
-      position: fixed;
-      inset: 0;
-      display: none;
-      place-items: center;
-      background: rgba(0,0,0,.88);
-      z-index: 5;
-    }
-    .menu-box {
-      width: min(820px, 94vw);
-      max-height: 92vh;
-      overflow: auto;
-      background: #121212;
-      border: 2px solid var(--soul);
-      border-radius: 12px;
-      padding: 14px;
-    }
-    .pill { color: #111; background: var(--gold); border-radius: 999px; font-size: .72rem; padding: 2px 8px; margin-left: 8px; }
-    @media (max-width: 920px) {
-      .app { grid-template-columns: 1fr; }
-    }
-  </style>
+<meta charset="UTF-8">
+<title>Snake 2: Multiplayer</title>
+<style>
+:root {
+  --dark: #080808;
+  --panel: #111;
+  --border: #222;
+  --gold: #ffd700;
+  --cyan: #00fbff;
+  --xp: #4ecca3;
+  --soul: #a020f0;
+  --hellfire: #ff4500;
+  --white: #ffffff;
+  --grid: 20px;
+}
+ 
+* { box-sizing: border-box; margin: 0; padding: 0; }
+ 
+body {
+  background: var(--dark);
+  color: #fff;
+  font-family: 'Segoe UI', sans-serif;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+ 
+/* ── SCREENS ── */
+.screen { display: none; }
+.screen.active { display: flex; }
+ 
+/* ── LOBBY ── */
+#lobby {
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 30px 20px;
+  min-height: 100vh;
+  gap: 20px;
+}
+ 
+#lobby h1 {
+  font-size: 2.8em;
+  color: var(--cyan);
+  text-shadow: 0 0 20px var(--cyan);
+  letter-spacing: 2px;
+}
+ 
+#lobby h2 {
+  color: #555;
+  font-size: 0.9em;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  margin-top: -14px;
+}
+ 
+.lobby-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  width: 100%;
+  max-width: 900px;
+}
+ 
+.lobby-grid.full { grid-template-columns: 1fr; }
+ 
+.panel {
+  background: #111;
+  border: 1px solid #222;
+  border-radius: 12px;
+  padding: 16px;
+}
+ 
+.panel h3 {
+  font-size: 0.7em;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  color: #666;
+  margin-bottom: 12px;
+}
+ 
+/* Player cards */
+#player-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  max-width: 900px;
+  width: 100%;
+}
+ 
+.player-card {
+  background: #111;
+  border: 2px solid #333;
+  border-radius: 10px;
+  padding: 12px;
+  position: relative;
+  transition: border-color 0.2s;
+}
+ 
+.player-card.active { border-color: var(--cyan); }
+.player-card.p2.active { border-color: #ff00ff; }
+.player-card.p3.active { border-color: var(--gold); }
+ 
+.player-card .player-num {
+  font-size: 0.65em;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  color: #555;
+  margin-bottom: 8px;
+}
+ 
+.player-card .snake-preview {
+  height: 20px;
+  border-radius: 4px;
+  margin: 8px 0;
+  transition: background 0.2s;
+}
+ 
+.player-card input[type="text"] {
+  width: 100%;
+  background: #000;
+  border: 1px solid #333;
+  color: #fff;
+  border-radius: 4px;
+  padding: 5px 8px;
+  font-size: 0.75em;
+  margin-bottom: 6px;
+}
+ 
+.player-card select, .player-card .control-display {
+  width: 100%;
+  background: #000;
+  border: 1px solid #333;
+  color: #aaa;
+  border-radius: 4px;
+  padding: 5px 8px;
+  font-size: 0.7em;
+  margin-bottom: 6px;
+}
+ 
+.player-card label {
+  font-size: 0.65em;
+  color: #555;
+  display: block;
+  margin-bottom: 2px;
+}
+ 
+.player-toggle {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  background: #222;
+  border: 1px solid #444;
+  color: #888;
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 0.65em;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+ 
+.player-toggle.on { background: #003020; color: var(--xp); border-color: var(--xp); }
+ 
+.save-import-area {
+  margin-top: 8px;
+}
+ 
+.save-import-area textarea {
+  width: 100%;
+  background: #000;
+  border: 1px solid #222;
+  color: var(--xp);
+  font-family: monospace;
+  font-size: 9px;
+  padding: 5px;
+  resize: none;
+  border-radius: 4px;
+}
+ 
+/* Color swatches */
+.color-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 4px;
+}
+ 
+.swatch {
+  width: 22px;
+  height: 22px;
+  border-radius: 3px;
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: border-color 0.1s, transform 0.1s;
+}
+ 
+.swatch:hover { transform: scale(1.15); }
+.swatch.selected { border-color: #fff; }
+ 
+/* Mode + Rules */
+.mode-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+ 
+.mode-btn {
+  background: #181818;
+  border: 1px solid #333;
+  color: #aaa;
+  border-radius: 8px;
+  padding: 10px 8px;
+  cursor: pointer;
+  text-align: left;
+  font-size: 0.75em;
+  transition: all 0.15s;
+}
+ 
+.mode-btn:hover { border-color: #555; color: #fff; }
+.mode-btn.selected { border-color: var(--cyan); color: var(--cyan); background: #001a1a; }
+.mode-btn .mode-title { font-weight: bold; display: block; }
+.mode-btn .mode-desc { color: #555; font-size: 0.85em; margin-top: 2px; display: block; }
+.mode-btn.selected .mode-desc { color: #4ab; }
+ 
+.rule-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid #1a1a1a;
+  font-size: 0.78em;
+  color: #ccc;
+}
+ 
+.rule-row:last-child { border-bottom: none; }
+ 
+.toggle-group {
+  display: flex;
+  gap: 4px;
+}
+ 
+.tog {
+  background: #222;
+  border: 1px solid #333;
+  color: #666;
+  border-radius: 4px;
+  padding: 3px 10px;
+  font-size: 0.7em;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+ 
+.tog.on { background: #003020; color: var(--xp); border-color: var(--xp); }
+.tog.off { background: #1a0000; color: #d44; border-color: #a22; }
+.tog.selected { background: #001a1a; color: var(--cyan); border-color: var(--cyan); }
+ 
+.win-opts {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+}
+ 
+.win-opt {
+  background: #181818;
+  border: 1px solid #2a2a2a;
+  border-radius: 6px;
+  padding: 7px 10px;
+  cursor: pointer;
+  font-size: 0.75em;
+  color: #888;
+  transition: all 0.15s;
+}
+ 
+.win-opt.selected { border-color: var(--gold); color: var(--gold); background: #1a1500; }
+ 
+.win-limit-row {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: #0d0d0d;
+  border-radius: 6px;
+  border: 1px solid #2a2200;
+  margin-top: 2px;
+}
+.win-limit-row.show { display: flex; }
+.win-limit-row label { font-size: 0.7em; color: #888; white-space: nowrap; }
+.win-limit-row input[type="number"] {
+  width: 80px;
+  background: #000;
+  border: 1px solid #444;
+  border-radius: 4px;
+  color: var(--gold);
+  font-size: 0.85em;
+  padding: 4px 8px;
+  text-align: center;
+  font-weight: bold;
+}
+ 
+.start-btn {
+  background: var(--cyan);
+  color: #000;
+  border: none;
+  border-radius: 10px;
+  padding: 16px 60px;
+  font-size: 1.1em;
+  font-weight: bold;
+  cursor: pointer;
+  letter-spacing: 2px;
+  transition: all 0.2s;
+  text-transform: uppercase;
+}
+ 
+.start-btn:hover { background: #fff; box-shadow: 0 0 20px var(--cyan); }
+.start-btn:disabled { background: #333; color: #555; cursor: not-allowed; box-shadow: none; }
+ 
+/* ── GAME SCREEN ── */
+#game-screen {
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  min-height: 100vh;
+  padding: 0;
+  gap: 0;
+  position: relative;
+}
+ 
+#hud {
+  display: flex;
+  gap: 12px;
+  width: 100%;
+  justify-content: center;
+  position: fixed;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  pointer-events: none;
+}
+ 
+.hud-card {
+  background: #111;
+  border: 1px solid #222;
+  border-radius: 8px;
+  padding: 8px 14px;
+  min-width: 120px;
+  text-align: center;
+}
+ 
+.hud-card .hud-name {
+  font-size: 0.65em;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  margin-bottom: 2px;
+}
+ 
+.hud-card .hud-score {
+  font-size: 1.3em;
+  font-weight: bold;
+  color: var(--cyan);
+}
+ 
+.hud-card .hud-status {
+  font-size: 0.6em;
+  color: #555;
+  margin-top: 2px;
+}
+ 
+#canvas-wrap {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+}
+ 
+#game-canvas {
+  display: block;
+  background: #000;
+  image-rendering: pixelated;
+  width: 100vw;
+  height: 100vh;
+}
+ 
+#game-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.88);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 12px;
+  z-index: 20;
+}
+ 
+#game-overlay.show { display: flex; }
+ 
+#overlay-title {
+  font-size: 2em;
+  font-weight: bold;
+  color: var(--gold);
+  text-shadow: 0 0 20px var(--gold);
+  letter-spacing: 2px;
+}
+ 
+#overlay-sub {
+  color: #ccc;
+  font-size: 0.9em;
+  text-align: center;
+  max-width: 300px;
+  line-height: 1.5;
+}
+ 
+#overlay-btn {
+  background: var(--cyan);
+  color: #000;
+  border: none;
+  border-radius: 8px;
+  padding: 10px 30px;
+  font-size: 0.9em;
+  font-weight: bold;
+  cursor: pointer;
+  letter-spacing: 1px;
+}
+ 
+#overlay-btn:hover { background: #fff; }
+ 
+#controls-hint {
+  font-size: 0.65em;
+  color: #333;
+  text-align: center;
+  max-width: 800px;
+}
+ 
+/* scrollbar */
+.tag {
+  display: inline-block;
+  font-size: 0.6em;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: #1a2a1a;
+  color: var(--xp);
+  border: 1px solid var(--xp);
+  margin-left: 5px;
+  vertical-align: middle;
+  letter-spacing: 1px;
+}
+ 
+.tag.new { background: #1a1a2a; color: var(--soul); border-color: var(--soul); }
+.tag.premium { background: #2a1a00; color: var(--gold); border-color: var(--gold); }
+ 
+.divider {
+  width: 100%;
+  max-width: 900px;
+  border: none;
+  border-top: 1px solid #1a1a1a;
+}
+ 
+.section-label {
+  font-size: 0.65em;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  color: #444;
+  text-align: center;
+}
+ 
+/* scrollbar */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
+ 
+/* Maxed RPG save rows */
+.save-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 0;
+  border-bottom: 1px solid #1a1a1a;
+}
+.save-row:last-child { border-bottom: none; }
+.save-row .save-name {
+  font-size: 0.75em;
+  font-weight: bold;
+  min-width: 80px;
+  padding-top: 8px;
+}
+.save-row textarea {
+  flex: 1;
+  background: #000;
+  border: 1px solid #333;
+  border-radius: 5px;
+  color: var(--xp);
+  font-family: monospace;
+  font-size: 9px;
+  padding: 6px;
+  resize: none;
+  height: 48px;
+}
+.save-row textarea:focus { border-color: var(--soul); outline: none; }
+.save-row .decode-btn {
+  background: #1a002a;
+  border: 1px solid var(--soul);
+  color: var(--soul);
+  border-radius: 5px;
+  padding: 6px 12px;
+  font-size: 0.7em;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s;
+  align-self: center;
+}
+.save-row .decode-btn:hover { background: #2a0040; }
+.save-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+.stat-chip {
+  font-size: 0.6em;
+  padding: 2px 7px;
+  border-radius: 10px;
+  background: #111;
+  border: 1px solid #333;
+  color: #888;
+}
+.stat-chip.active { border-color: var(--xp); color: var(--xp); background: #001a10; }
+.stat-chip.soul   { border-color: var(--soul); color: var(--soul); background: #0d001a; }
+.stat-chip.gold   { border-color: var(--gold); color: var(--gold); background: #1a1200; }
+</style>
 </head>
 <body>
-  <div class="app">
-    <div class="arena-wrap">
-      <canvas id="game" width="700" height="700"></canvas>
-      <div id="intro" class="overlay">
-        <div>
-          <h2>Snake 2 Multiplayer (Unchained)</h2>
-          <p>Walls retreat: snakes leave one side and return on the opposite side.</p>
-          <p>Press <span class="kbd">Space</span> to start. Press <span class="kbd">3</span> for multiplayer setup menu.</p>
+ 
+<!-- ══════════════════════════════════════ LOBBY ══════════════════════════════════════ -->
+<div id="lobby" class="screen active">
+  <h1>Snake 2</h1>
+  <h2>Multiplayer</h2>
+ 
+  <!-- Player Cards -->
+  <div id="player-cards">
+    <!-- Generated by JS -->
+  </div>
+ 
+  <hr class="divider">
+  <div class="section-label">Game Setup</div>
+ 
+  <div class="lobby-grid" style="max-width:900px; width:100%;">
+    <!-- Left: Mode -->
+    <div class="panel">
+      <h3>Game Mode</h3>
+      <div class="mode-grid" id="mode-grid">
+        <button class="mode-btn selected" data-mode="classic" onclick="selectMode('classic', this)">
+          <span class="mode-title">Classic</span>
+          <span class="mode-desc">Standard snake on a fixed grid</span>
+        </button>
+        <button class="mode-btn" data-mode="unchained" onclick="selectMode('unchained', this)">
+          <span class="mode-title">Unchained <span class="tag new">NEW</span></span>
+          <span class="mode-desc">Screen is the playfield. Walls retreat.</span>
+        </button>
+        <button class="mode-btn" data-mode="carnival" onclick="selectMode('carnival', this)">
+          <span class="mode-title">Carnival</span>
+          <span class="mode-desc">Apples grant random abilities</span>
+        </button>
+        <button class="mode-btn" data-mode="rpg" onclick="selectMode('rpg', this)">
+          <span class="mode-title">RPG Snake</span>
+          <span class="mode-desc">Special cores upgrade over time</span>
+        </button>
+        <button class="mode-btn" data-mode="maxrpg" onclick="selectMode('maxrpg', this)">
+          <span class="mode-title">Maxed RPG <span class="tag premium">SAVE</span></span>
+          <span class="mode-desc">Import single-player save data</span>
+        </button>
+      </div>
+    </div>
+ 
+    <!-- Right: Rules -->
+    <div class="panel">
+      <h3>Rules</h3>
+ 
+      <div class="rule-row">
+        <span>Win Condition</span>
+      </div>
+      <div class="win-opts" id="win-opts">
+        <div class="win-opt selected" data-win="longest" onclick="selectWin('longest', this)">🐍 Longest snake wins</div>
+        <div class="win-limit-row show" id="limit-longest">
+          <label>Time limit (sec)</label>
+          <input type="number" id="limit-longest-val" min="10" max="600" value="120" oninput="lobbyState.winLimit=+this.value">
+        </div>
+        <div class="win-opt" data-win="score" onclick="selectWin('score', this)">⭐ Highest score wins</div>
+        <div class="win-limit-row" id="limit-score">
+          <label>Score limit</label>
+          <input type="number" id="limit-score-val" min="50" max="9999" value="500" oninput="lobbyState.winLimit=+this.value">
+        </div>
+        <div class="win-opt" data-win="kills" onclick="selectWin('kills', this)">💀 Most kills wins</div>
+        <div class="win-limit-row" id="limit-kills">
+          <label>Kill limit</label>
+          <input type="number" id="limit-kills-val" min="1" max="99" value="5" oninput="lobbyState.winLimit=+this.value">
+        </div>
+        <div class="win-opt" data-win="last" onclick="selectWin('last', this)">⚔ Last to live</div>
+      </div>
+ 
+      <div class="rule-row" style="margin-top:10px;">
+        <span>Respawn on death</span>
+        <div class="toggle-group">
+          <button class="tog on" id="respawn-on" onclick="setRule('respawn', true)">ON</button>
+          <button class="tog" id="respawn-off" onclick="setRule('respawn', false)">OFF</button>
+        </div>
+      </div>
+ 
+      <div class="rule-row">
+        <span>Wall wrapping</span>
+        <div class="toggle-group">
+          <button class="tog on" id="wall-on" onclick="setRule('wallWrap', true)">ON</button>
+          <button class="tog" id="wall-off" onclick="setRule('wallWrap', false)">OFF</button>
+        </div>
+      </div>
+ 
+      <div class="rule-row">
+        <span>Head-on → both die</span>
+        <div class="toggle-group">
+          <button class="tog on" id="headon-on" onclick="setRule('headOn', true)">ON</button>
+          <button class="tog" id="headon-off" onclick="setRule('headOn', false)">OFF</button>
+        </div>
+      </div>
+ 
+      <div class="rule-row">
+        <span>Self-collision</span>
+        <div class="toggle-group">
+          <button class="tog on" id="self-on" onclick="setRule('selfCollide', true)">ON</button>
+          <button class="tog" id="self-off" onclick="setRule('selfCollide', false)">OFF</button>
         </div>
       </div>
     </div>
-
-    <aside class="sidebar">
-      <div class="panel">
-        <h1>Snake 2 Arena<span class="pill">3 Player Unlocked</span></h1>
-        <div class="tiny">Keep the Snake 2 look, remove unnecessary RPG clutter, focus on multiplayer.</div>
-      </div>
-
-      <div class="panel">
-        <h3>Game Mode</h3>
-        <div class="row">
-          <select id="mode">
-            <option value="base">Base Snake</option>
-            <option value="carnival">Carnival (apples = abilities)</option>
-            <option value="rpg">RPG Snake (cores upgrade over time)</option>
-            <option value="maxed">Maxed RPG Snake (from save)</option>
-          </select>
-        </div>
-        <div class="row" style="margin-top:8px;">
-          <select id="victory">
-            <option value="lastAlive">Last to Live</option>
-            <option value="longest">Longest Snake Wins</option>
-            <option value="points">Highest Points Wins</option>
-            <option value="kills">Most Kills Wins</option>
-          </select>
-          <label class="tiny" style="display:flex; gap:6px; align-items:center; justify-content:flex-end;">
-            <input id="respawn" type="checkbox" checked /> Respawn?
-          </label>
-        </div>
-      </div>
-
-      <div class="panel">
-        <h3>Scoreboard</h3>
-        <div class="legend">Name | Length | Points | Kills | Lives</div>
-        <div id="scoreboard" class="scoreboard"></div>
-      </div>
-
-      <div class="panel">
-        <h3>Rules (Applied)</h3>
-        <div class="legend">
-          • Head hits body → death<br />
-          • Head-on → both die<br />
-          • Self-collision → death<br />
-          • Playfield is the screen (wraparound)
-        </div>
-      </div>
-    </aside>
   </div>
-
-  <div id="configMenu" class="menu">
-    <div class="menu-box">
-      <h2 style="margin:0 0 8px; color:var(--soul)">Multiplayer Setup (Press 3 to close)</h2>
-      <div class="row">
-        <label>How many snakes?
-          <select id="playerCount">
-            <option value="2">2 Snakes</option>
-            <option value="3">3 Snakes</option>
-          </select>
-        </label>
+ 
+  <button class="start-btn" id="start-btn" onclick="startGame()">START MATCH</button>
+  <div id="controls-hint"></div>
+ 
+  <!-- Maxed RPG save code panel — shown only when that mode is selected -->
+  <div id="maxrpg-save-panel" style="display:none; max-width:900px; width:100%;">
+    <div class="panel" style="border-left: 3px solid var(--soul);">
+      <h3 style="color:var(--soul); margin-bottom:10px;">⚡ Maxed RPG — Import Save Codes</h3>
+      <p style="font-size:0.72em; color:#666; margin-bottom:12px; line-height:1.5;">
+        Paste each player's single-player save code below. Permanent skills (Speed, Size, Growth), 
+        Soul upgrades (Phase, No Wall, Shedding, Cannibalism, Soul Insurance) and Apple upgrades 
+        (Gold Apple, Dual Apple, Echo Growth) will all be imported and active during the match.
+      </p>
+      <div id="maxrpg-save-inputs">
+        <!-- Filled by buildMaxRPGPanel() -->
       </div>
-      <div id="players" class="players" style="margin-top:10px;"></div>
-
-      <h3>Upload save data for custom snakes (JSON)</h3>
-      <textarea id="saveData" rows="4" placeholder='[{"name":"Custom","color":"#00ff88","pattern":"dashed","speed":8}]'></textarea>
-      <div class="row" style="margin-top:8px;">
-        <button id="loadSave">Apply Save Data</button>
-        <button id="resetCfg">Reset Players</button>
-      </div>
-      <p class="tiny">Save data can override name, color, speed, pattern, and startingLength for each snake.</p>
     </div>
   </div>
-
+</div>
+ 
+<!-- ══════════════════════════════════════ GAME ══════════════════════════════════════ -->
+<div id="game-screen" class="screen">
+  <div id="hud"></div>
+  <div id="canvas-wrap">
+    <canvas id="game-canvas"></canvas>
+    <div id="game-overlay">
+      <div id="overlay-title">WINNER</div>
+      <div id="overlay-sub"></div>
+      <button id="overlay-btn" onclick="goLobby()">Back to Lobby</button>
+    </div>
+  </div>
+  <div id="controls-hint-game" style="font-size:0.6em; color:#333; text-align:center; padding:6px;"></div>
+</div>
+ 
 <script>
-const canvas = document.getElementById('game');
-const ctx = canvas.getContext('2d');
-const grid = 35;
-const tile = canvas.width / grid;
-
-const state = {
-  running: false,
-  mode: 'base',
-  victory: 'lastAlive',
-  respawn: true,
-  players: [],
-  apples: [{x: 8, y: 8, kind:'main'}],
-  ticks: 0,
+// ═══════════════════════════════════════════════════════════════════════
+// CONFIG
+// ═══════════════════════════════════════════════════════════════════════
+ 
+const GRID = 20;
+const CELL = 20;
+const MAX_PLAYERS = 3;
+ 
+const PLAYER_DEFAULTS = [
+  { name: 'Player 1', color: '#00fbff', controls: 'arrows', keys: { up:'ArrowUp', down:'ArrowDown', left:'ArrowLeft', right:'ArrowRight' } },
+  { name: 'Player 2', color: '#ff00ff', controls: 'wasd',   keys: { up:'w', down:'s', left:'a', right:'d' } },
+  { name: 'Player 3', color: '#ffd700', controls: 'uhjk',   keys: { up:'u', down:'j', left:'h', right:'k' } },
+];
+ 
+const SWATCH_COLORS = [
+  '#00fbff','#ff00ff','#ffd700','#4ecca3','#ff4500','#ff2e63',
+  '#adff2f','#9370db','#1e90ff','#ffffff','#ff69b4','#00ff7f',
+  '#ff8c00','#7b68ee','#a020f0','#013220'
+];
+ 
+const CARNIVAL_ABILITIES = [
+  { name: 'SPEED BURST',   color: '#ff4500', effect: p => { p.tempSpeed = Math.max(40, p.speed - 40); setTimeout(() => p.tempSpeed = null, 3000); } },
+  { name: 'GHOST',         color: '#a020f0', effect: p => { p.ghost = true; setTimeout(() => p.ghost = false, 2000); } },
+  { name: 'MAGNET',        color: '#ffd700', effect: p => { p.magnet = true; setTimeout(() => p.magnet = false, 4000); } },
+  { name: 'GROW x3',       color: '#4ecca3', effect: p => { p.growCount += 6; } },
+  { name: 'SHRINK OTHERS', color: '#ff00ff', effect: (p, players) => { players.forEach(o => { if (o !== p && o.alive && o.body.length > 4) o.body.splice(o.body.length - 3); }); } },
+  { name: 'REVERSE!',      color: '#ff2e63', effect: p => { p.body.reverse(); p.dx = -p.dx; p.dy = -p.dy; } },
+];
+ 
+// ═══════════════════════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════════════════════
+ 
+let lobbyState = {
+  players: [
+    { active: true,  name: 'Player 1', color: '#00fbff', controls: 'arrows', keys: { ...PLAYER_DEFAULTS[0].keys }, saveCode: '' },
+    { active: false, name: 'Player 2', color: '#ff00ff', controls: 'wasd',   keys: { ...PLAYER_DEFAULTS[1].keys }, saveCode: '' },
+    { active: false, name: 'Player 3', color: '#ffd700', controls: 'uhjk',   keys: { ...PLAYER_DEFAULTS[2].keys }, saveCode: '' },
+  ],
+  mode: 'classic',
+  winCondition: 'longest',
+  winLimit: 120,
+  rules: { respawn: true, wallWrap: true, headOn: true, selfCollide: true },
+  speed: 220,
 };
-
-const controls = [
-  {up:'ArrowUp', down:'ArrowDown', left:'ArrowLeft', right:'ArrowRight'},
-  {up:'w', down:'s', left:'a', right:'d'},
-  {up:'i', down:'k', left:'j', right:'l'}
-];
-const defaultConfigs = [
-  {name:'Snake 1', color:'#00fbff', pattern:'solid'},
-  {name:'Snake 2', color:'#ffd700', pattern:'dashed'},
-  {name:'Snake 3', color:'#ff00ff', pattern:'glow'},
-];
-
-function makeSnake(i, cfg = {}) {
-  const c = { ...defaultConfigs[i], ...cfg };
-  const start = [{x:5 + i*10, y:5 + i*10}, {x:4 + i*10, y:5 + i*10}, {x:3 + i*10, y:5 + i*10}];
-  if (c.startingLength && c.startingLength > 3) {
-    while (start.length < c.startingLength) {
-      const t = start[start.length - 1];
-      start.push({x: t.x - 1, y: t.y});
-    }
-  }
-  return {
-    id: i,
-    ...c,
-    body: start,
-    dir: {x: 1, y: 0},
-    pendingDir: {x: 1, y: 0},
-    alive: true,
-    points: 0,
-    kills: 0,
-    lives: 3,
-    speedBoost: 0,
-    coreLevel: c.coreLevel || 1,
-    xp: 0,
-  };
+ 
+let gameState = null;
+let gameLoop = null;
+let canvas, ctx;
+ 
+// ═══════════════════════════════════════════════════════════════════════
+// LOBBY RENDERING
+// ═══════════════════════════════════════════════════════════════════════
+ 
+function buildLobby() {
+  const container = document.getElementById('player-cards');
+  container.innerHTML = '';
+ 
+  lobbyState.players.forEach((p, i) => {
+    const cls = ['p1','p2','p3'][i];
+    const card = document.createElement('div');
+    card.className = `player-card ${cls} ${p.active ? 'active' : ''}`;
+    card.id = `card-${i}`;
+ 
+    const controlsLabel = {
+      arrows: '↑↓←→ Arrow Keys',
+      wasd:   'W / A / S / D',
+      uhjk:   'U / H / J / K',
+      custom: 'Custom'
+    }[p.controls] || p.controls;
+ 
+    card.innerHTML = `
+      <button class="player-toggle ${p.active ? 'on' : ''}" onclick="togglePlayer(${i})">${p.active ? 'ON' : 'OFF'}</button>
+      <div class="player-num">Player ${i+1}</div>
+ 
+      <label>Name</label>
+      <input type="text" value="${p.name}" oninput="updatePlayer(${i},'name',this.value)" ${!p.active?'disabled':''}>
+ 
+      <label>Color</label>
+      <div class="color-swatches" id="swatches-${i}">
+        ${SWATCH_COLORS.map(c => `<div class="swatch ${c===p.color?'selected':''}" style="background:${c}" onclick="pickColor(${i},'${c}')"></div>`).join('')}
+      </div>
+ 
+      <div class="snake-preview" style="background:${p.color}"></div>
+ 
+      <label>Controls</label>
+      <select onchange="updatePlayer(${i},'controls',this.value)" ${!p.active?'disabled':''}>
+        <option value="arrows" ${p.controls==='arrows'?'selected':''}>Arrow Keys</option>
+        <option value="wasd"   ${p.controls==='wasd'  ?'selected':''}>WASD</option>
+        <option value="uhjk"   ${p.controls==='uhjk'  ?'selected':''}>UHJK</option>
+      </select>
+ 
+      <div class="control-display" style="font-size:0.65em; color:#555; padding:4px 8px;">${controlsLabel}</div>
+    `;
+    container.appendChild(card);
+  });
+ 
+  updateControlsHint();
 }
-
-function resetGame() {
-  const count = Number(document.getElementById('playerCount').value || 2);
-  state.players = Array.from({length: count}, (_, i) => makeSnake(i, readPlayerCfg(i)));
-  state.apples = [spawnApple('main'), spawnApple('bonus')];
-  state.ticks = 0;
-  renderBoard();
-  renderScoreboard();
+ 
+function togglePlayer(i) {
+  if (i === 0) return; // P1 always on
+  lobbyState.players[i].active = !lobbyState.players[i].active;
+  buildLobby();
+  validateStart();
 }
-
-function readPlayerCfg(i) {
-  const card = document.querySelector(`[data-player="${i}"]`);
-  if (!card) return {};
-  const cfg = {
-    name: card.querySelector('.pname').value || `Snake ${i+1}`,
-    color: card.querySelector('.pcolor').value,
-    pattern: card.querySelector('.ppattern').value,
-    speed: Number(card.querySelector('.pspeed').value || 7),
-  };
-  if (card.dataset.startingLength) cfg.startingLength = Number(card.dataset.startingLength);
-  if (card.dataset.coreLevel) cfg.coreLevel = Number(card.dataset.coreLevel);
-  return cfg;
-}
-
-function spawnApple(kind='main') {
-  return {
-    x: Math.floor(Math.random() * grid),
-    y: Math.floor(Math.random() * grid),
-    kind,
-  };
-}
-
-function wrap(v) {
-  if (v < 0) return grid - 1;
-  if (v >= grid) return 0;
-  return v;
-}
-
-function changeDir(player, key) {
-  const c = controls[player.id];
-  if (!c || !player.alive) return;
-  let nd = null;
-  if (key === c.up) nd = {x:0,y:-1};
-  if (key === c.down) nd = {x:0,y:1};
-  if (key === c.left) nd = {x:-1,y:0};
-  if (key === c.right) nd = {x:1,y:0};
-  if (!nd) return;
-  if (nd.x === -player.dir.x && nd.y === -player.dir.y) return;
-  player.pendingDir = nd;
-}
-
-function killSnake(s, killerId = null) {
-  if (!s.alive) return;
-  s.alive = false;
-  s.lives -= 1;
-  if (killerId !== null && state.players[killerId]) state.players[killerId].kills += 1;
-  if (state.respawn && s.lives > 0) {
-    setTimeout(() => {
-      const reborn = makeSnake(s.id, s);
-      reborn.points = s.points;
-      reborn.kills = s.kills;
-      reborn.lives = s.lives;
-      state.players[s.id] = reborn;
-      renderScoreboard();
-    }, 800);
-  }
-}
-
-function applyModeEffects(s, ateKind) {
-  if (state.mode === 'carnival' && ateKind === 'bonus') {
-    s.speedBoost = 50;
-    s.points += 2;
-  }
-  if (state.mode === 'rpg' || state.mode === 'maxed') {
-    s.xp += 1;
-    if (s.xp % 6 === 0) {
-      s.coreLevel += 1;
-      s.points += 3;
-    }
-  }
-  if (state.mode === 'maxed') {
-    s.coreLevel = Math.max(s.coreLevel, 5);
-    s.speed = Math.max(s.speed || 7, 10);
-  }
-}
-
-function tick() {
-  if (!state.running) return;
-  state.ticks++;
-  const heads = [];
-
-  for (const s of state.players) {
-    if (!s.alive) continue;
-    s.dir = s.pendingDir;
-    const speed = (s.speed || 7) + (s.speedBoost > 0 ? 2 : 0) + (s.coreLevel >= 4 ? 1 : 0);
-    if (state.ticks % Math.max(2, Math.floor(16 - speed)) !== 0) continue;
-
-    const head = {
-      x: wrap(s.body[0].x + s.dir.x),
-      y: wrap(s.body[0].y + s.dir.y)
+ 
+function updatePlayer(i, key, val) {
+  lobbyState.players[i][key] = val;
+  if (key === 'controls') {
+    const presets = {
+      arrows: { up:'ArrowUp', down:'ArrowDown', left:'ArrowLeft', right:'ArrowRight' },
+      wasd:   { up:'w', down:'s', left:'a', right:'d' },
+      uhjk:   { up:'u', down:'j', left:'h', right:'k' },
     };
-    heads.push({id: s.id, head});
-    s.body.unshift(head);
-
-    const appleIdx = state.apples.findIndex(a => a.x === head.x && a.y === head.y);
-    if (appleIdx >= 0) {
-      const eaten = state.apples[appleIdx];
-      s.points += eaten.kind === 'main' ? 1 : 2;
-      applyModeEffects(s, eaten.kind);
-      state.apples[appleIdx] = spawnApple(eaten.kind);
-    } else {
-      s.body.pop();
+    if (presets[val]) lobbyState.players[i].keys = { ...presets[val] };
+    buildLobby();
+  }
+  updateControlsHint();
+}
+ 
+function pickColor(i, color) {
+  lobbyState.players[i].color = color;
+  buildLobby();
+}
+ 
+function selectMode(mode, btn) {
+  lobbyState.mode = mode;
+  document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('selected'));
+  btn.classList.add('selected');
+  const panel = document.getElementById('maxrpg-save-panel');
+  if (panel) panel.style.display = mode === 'maxrpg' ? 'block' : 'none';
+  if (mode === 'maxrpg') buildMaxRPGPanel();
+  buildLobby();
+  validateStart();
+}
+ 
+function buildMaxRPGPanel() {
+  const container = document.getElementById('maxrpg-save-inputs');
+  if (!container) return;
+  container.innerHTML = '';
+  lobbyState.players.filter(p => p.active).forEach((p, i) => {
+    const idx = lobbyState.players.indexOf(p);
+    const row = document.createElement('div');
+    row.className = 'save-row';
+    row.id = `maxrpg-row-${idx}`;
+    row.innerHTML = `
+      <div>
+        <div class="save-name" style="color:${p.color}">${p.name}</div>
+      </div>
+      <div style="flex:1;">
+        <textarea id="maxrpg-code-${idx}" placeholder="Paste save code..." rows="2"
+          oninput="lobbyState.players[${idx}].saveCode=this.value">${p.saveCode||''}</textarea>
+        <div class="save-stats" id="save-stats-${idx}"></div>
+      </div>
+      <button class="decode-btn" onclick="previewSaveCode(${idx})">DECODE</button>
+    `;
+    container.appendChild(row);
+    // Auto-preview if code already present
+    if (p.saveCode && p.saveCode.trim()) previewSaveCode(idx);
+  });
+}
+ 
+function previewSaveCode(playerIdx) {
+  const p = lobbyState.players[playerIdx];
+  const code = (document.getElementById(`maxrpg-code-${playerIdx}`) || {}).value || p.saveCode || '';
+  p.saveCode = code.trim();
+ 
+  const statsEl = document.getElementById(`save-stats-${playerIdx}`);
+  if (!statsEl) return;
+ 
+  const sd = decodeSave(p.saveCode);
+  if (!sd) {
+    statsEl.innerHTML = '<span class="stat-chip" style="color:#f44;">Invalid code</span>';
+    return;
+  }
+ 
+  // Apply it so rpgStats is populated
+  applyMaxRPGSave(p, sd);
+  const r = p.rpgStats;
+ 
+  const chips = [];
+ 
+  // Permanent stats
+  chips.push({ label: `LVL ${r.lvl}`,             cls: 'active' });
+  chips.push({ label: `SPD ${r.speed}ms`,          cls: 'active' });
+  chips.push({ label: `SIZE ${r.startSz}`,         cls: 'active' });
+  chips.push({ label: `EVO ${r.evo}`,              cls: 'active' });
+ 
+  // Soul upgrades
+  if (r.noWall)       chips.push({ label: 'NO WALL',        cls: 'soul' });
+  if (r.hasPhase)     chips.push({ label: `PHASE +${r.phasePower}`,   cls: 'soul' });
+  if (r.dualPhase)    chips.push({ label: 'DUAL PHASE',     cls: 'soul' });
+  if (r.phaseGreed)   chips.push({ label: 'PHASE GREED',    cls: 'soul' });
+  if (r.phaseExpertise) chips.push({ label: 'PHASE EXPERT', cls: 'soul' });
+  if (r.phaseCharge)  chips.push({ label: 'PHASE CHARGE',   cls: 'soul' });
+  if (r.temporalSlow) chips.push({ label: 'TEMPORAL SLOW',  cls: 'soul' });
+  if (r.immortalPhase)chips.push({ label: 'IMMORTAL PHASE', cls: 'soul' });
+  if (r.soulInsurance)chips.push({ label: 'SOUL INSURANCE', cls: 'soul' });
+  if (r.sheddingLevel > 0) chips.push({ label: `SHEDDING L${r.sheddingLevel}`, cls: 'soul' });
+  if (r.cannibalism)  chips.push({ label: 'CANNIBALISM',    cls: 'soul' });
+  if (r.shedOnImpact) chips.push({ label: 'SHED ON IMPACT', cls: 'soul' });
+ 
+  // Apple upgrades
+  if (r.goldAppleLevel > 0)  chips.push({ label: `GOLD APPLE L${r.goldAppleLevel}`,  cls: 'gold' });
+  if (r.dualAppleLevel > 0)  chips.push({ label: `DUAL APPLE L${r.dualAppleLevel}`,  cls: 'gold' });
+  if (r.echoGrowthLevel > 0) chips.push({ label: `ECHO GROWTH L${r.echoGrowthLevel}`,cls: 'gold' });
+ 
+  statsEl.innerHTML = chips.map(c =>
+    `<span class="stat-chip ${c.cls}">${c.label}</span>`
+  ).join('');
+ 
+  // Update color swatch from save skin
+  if (sd.skin && sd.skin.startsWith('#')) {
+    p.color = sd.skin;
+    buildLobby();
+    if (lobbyState.mode === 'maxrpg') buildMaxRPGPanel();
+  }
+}
+ 
+  lobbyState.winCondition = win;
+  document.querySelectorAll('.win-opt').forEach(e => e.classList.remove('selected'));
+  el.classList.add('selected');
+ 
+  // Show the right limit row, hide others
+  ['longest','score','kills'].forEach(key => {
+    const row = document.getElementById(`limit-${key}`);
+    if (row) row.classList.toggle('show', key === win);
+  });
+ 
+  // Sync winLimit from the now-visible input
+  const inputMap = { longest: 'limit-longest-val', score: 'limit-score-val', kills: 'limit-kills-val' };
+  if (inputMap[win]) {
+    const inp = document.getElementById(inputMap[win]);
+    if (inp) lobbyState.winLimit = +inp.value;
+  }
+}
+ 
+function setRule(key, val) {
+  lobbyState.rules[key] = val;
+  const onId = `${key === 'respawn' ? 'respawn' : key === 'wallWrap' ? 'wall' : key === 'headOn' ? 'headon' : 'self'}-on`;
+  const offId = onId.replace('-on', '-off');
+  document.getElementById(onId).classList.toggle('on', val);
+  document.getElementById(offId).classList.toggle('on', !val);
+}
+ 
+function validateStart() {
+  const activePlayers = lobbyState.players.filter(p => p.active);
+  const btn = document.getElementById('start-btn');
+  btn.disabled = activePlayers.length < 1;
+}
+ 
+function updateControlsHint() {
+  const lines = lobbyState.players
+    .filter(p => p.active)
+    .map(p => {
+      const k = p.keys;
+      return `${p.name}: ${k.up}/${k.left}/${k.down}/${k.right}`;
+    });
+  const el = document.getElementById('controls-hint');
+  if (el) el.textContent = lines.join('   ·   ');
+}
+ 
+// ═══════════════════════════════════════════════════════════════════════
+// SAVE CODE IMPORT (for Maxed RPG mode)
+// ═══════════════════════════════════════════════════════════════════════
+ 
+function decodeSave(code) {
+  if (!code || !code.trim()) return null;
+  try {
+    return JSON.parse(atob(code.trim()));
+  } catch(e) {
+    return null;
+  }
+}
+ 
+// Maps every relevant single-player save flag into a runtime player object
+function applyMaxRPGSave(lp, sd) {
+  if (!sd) return;
+ 
+  // Permanent skill upgrades (speed/size/evo)
+  // In single-player: spd starts at 140, each Speed upgrade = -5ms. cSpd tracks cost.
+  // evo starts at 1, startSz starts at 3
+  const permSpeed  = sd.spd      != null ? sd.spd      : 180;  // already in ms
+  const permSize   = sd.startSz  != null ? sd.startSz  : 3;
+  const permEvo    = sd.evo      != null ? sd.evo      : 1;
+ 
+  // Soul upgrades - booleans straight from save
+  const noWall          = !!sd.noWall;
+  const hasPhase        = !!sd.hasPhase;
+  const phasePower      = sd.phasePower      || 0;
+  const dualPhase       = !!sd.dualPhase;
+  const phaseGreed      = !!sd.phaseGreed;
+  const phaseExpertise  = !!sd.phaseExpertise;
+  const phaseCharge     = !!sd.phaseCharge;
+  const temporalSlow    = !!sd.temporalPhaseSlow;
+  const immortalPhase   = !!sd.immortalPhase;
+  const soulInsurance   = !!sd.soulInsurance;
+  const shedOnImpact    = !!sd.shedOnImpact;
+  const sheddingLevel   = sd.sheddingLevel   || 0;
+  const cannibalism     = !!sd.cannibalism;
+  const goldAppleLevel  = sd.goldAppleLevel  || 0;
+  const dualAppleLevel  = sd.dualAppleLevel  || 0;
+  const echoGrowthLevel = sd.echoGrowthLevel || 0;
+ 
+  // Cosmetics
+  const skin    = (sd.skin && sd.skin.startsWith('#')) ? sd.skin : lp.color;
+  const pattern = sd.snakePattern || 'solid';
+ 
+  lp.color = skin;
+  lp.rpgStats = {
+    // movement
+    speed:          Math.max(60, permSpeed),
+    startSz:        permSize,
+    evo:            permEvo,
+    // wall
+    noWall,
+    // phase
+    hasPhase, phasePower, dualPhase,
+    phaseGreed, phaseExpertise, phaseCharge,
+    temporalSlow, immortalPhase,
+    phaseCharges:   dualPhase ? 2 : (hasPhase ? 1 : 0),
+    phaseDuration:  1500 + phasePower * 1000,
+    // insurance
+    soulInsurance,
+    soulInsuranceUsed: false,
+    // shedding
+    sheddingLevel,
+    cannibalism,
+    shedOnImpact,
+    // apples
+    goldAppleLevel,
+    dualAppleLevel,
+    echoGrowthLevel,
+    // cosmetics
+    skin, pattern,
+    // meta
+    lvl:    sd.lvl    || 1,
+    shards: sd.shards || 0,
+  };
+}
+ 
+// ═══════════════════════════════════════════════════════════════════════
+// GAME INITIALIZATION
+// ═══════════════════════════════════════════════════════════════════════
+ 
+const SPAWN_POSITIONS = [
+  { x: 5,  y: 5,  dx: 1,  dy: 0 },
+  { x: 14, y: 14, dx: -1, dy: 0 },
+  { x: 5,  y: 14, dx: 1,  dy: 0 },
+  { x: 14, y: 5,  dx: -1, dy: 0 },
+];
+ 
+function startGame() {
+  canvas = document.getElementById('game-canvas');
+  ctx = canvas.getContext('2d');
+ 
+  // Always fill the whole screen
+  canvas.width  = window.innerWidth;
+  canvas.height = window.innerHeight;
+  document.body.classList.remove('unchained');
+ 
+  const gridW = Math.floor(canvas.width  / CELL);
+  const gridH = Math.floor(canvas.height / CELL);
+ 
+  // Build active players
+  const activeLobbyPlayers = lobbyState.players.filter(p => p.active);
+  const players = activeLobbyPlayers.map((lp, i) => {
+    const spawn = SPAWN_POSITIONS[i % 4];
+    const sx = Math.floor(spawn.x * gridW / GRID);
+    const sy = Math.floor(spawn.y * gridH / GRID);
+ 
+    let speed   = lobbyState.speed;
+    let startSz = 3;
+    let rpg     = null;
+ 
+    // Max RPG: decode save and apply all stats
+    if (lobbyState.mode === 'maxrpg' && lp.saveCode && lp.saveCode.trim()) {
+      const sd = decodeSave(lp.saveCode);
+      if (sd) {
+        applyMaxRPGSave(lp, sd);
+        rpg     = lp.rpgStats;
+        speed   = rpg.speed;
+        startSz = rpg.startSz;
+      }
     }
-
-    if (s.speedBoost > 0) s.speedBoost--;
+ 
+    const body = [];
+    for (let j = 0; j < Math.max(3, startSz); j++) {
+      body.push({ x: sx - spawn.dx * j, y: sy });
+    }
+ 
+    // Phase runtime state (pulled from rpgStats if present)
+    const phaseCharges   = rpg ? rpg.phaseCharges   : 0;
+    const phaseDuration  = rpg ? rpg.phaseDuration  : 1500;
+ 
+    return {
+      id: i,
+      name: lp.name,
+      color: lp.color,
+      keys: { ...lp.keys },
+      body,
+      dx: spawn.dx,
+      dy: spawn.dy,
+      inputQueue: [],
+      alive: true,
+      score: 0,
+      kills: 0,
+      growCount: 0,
+      applesEaten: 0,
+      speed,
+      tempSpeed: null,
+      ghost: false,
+      magnet: false,
+      shedTailPieces: [],
+      // Phase
+      phaseActive:  false,
+      phaseCD:      false,
+      phaseCharges,
+      phaseDuration,
+      phaseTimeout: null,
+      phaseCDTimer: null,
+      // Soul insurance
+      insuranceUsed: false,
+      // rpgStats reference (null for non-maxrpg)
+      rpg,
+      rpgCoresCollected: [],
+      // Misc
+      tickAccum:    0,
+      respawnTimer: 0,
+      deathCount:   0,
+    };
+  });
+ 
+  // Apples
+  const apples = [];
+  for (let i = 0; i < Math.max(2, activeLobbyPlayers.length); i++) {
+    const spot = randomEmptySpot(players, apples, gridW, gridH);
+    if (spot) apples.push({ x: spot.x, y: spot.y, type: 'normal', color: '#ff2e63' });
   }
-
-  // Self collision
-  for (const s of state.players) {
-    if (!s.alive) continue;
-    const [head, ...rest] = s.body;
-    if (rest.some(seg => seg.x === head.x && seg.y === head.y)) killSnake(s);
+ 
+  gameState = {
+    players,
+    apples,
+    mode: lobbyState.mode,
+    winCondition: lobbyState.winCondition,
+    winLimit: lobbyState.winLimit || 120,
+    rules: { ...lobbyState.rules },
+    gridW,
+    gridH,
+    tick: 0,
+    over: false,
+    winner: null,
+    lastTime: 0,
+    carnivalAbilityToast: null,
+    rpgCoreSpawnTick: 0,
+    matchStartTime: Date.now(),
+  };
+ 
+  // Build HUD
+  buildHUD(players);
+ 
+  // Build controls hint
+  const hintEl = document.getElementById('controls-hint-game');
+  hintEl.textContent = players.map(p => {
+    const k = p.keys;
+    return `${p.name}: ${k.up}/${k.left}/${k.down}/${k.right}`;
+  }).join('   ·   ');
+ 
+  // Switch screen
+  document.getElementById('lobby').classList.remove('active');
+  document.getElementById('game-screen').classList.add('active');
+  document.getElementById('game-overlay').classList.remove('show');
+ 
+  // Start loop
+  if (gameLoop) clearInterval(gameLoop);
+  requestAnimationFrame(gameTick);
+}
+ 
+function buildHUD(players) {
+  const hud = document.getElementById('hud');
+  hud.innerHTML = '';
+ 
+  players.forEach(p => {
+    const card = document.createElement('div');
+    card.className = 'hud-card';
+    card.id = `hud-${p.id}`;
+    card.style.borderTop = `3px solid ${p.color}`;
+    card.innerHTML = `
+      <div class="hud-name" style="color:${p.color}">${p.name}</div>
+      <div class="hud-score" id="hud-score-${p.id}" style="color:${p.color}">0</div>
+      <div class="hud-status" id="hud-status-${p.id}"></div>
+    `;
+    hud.appendChild(card);
+  });
+ 
+  // Central timer/limit display
+  const timerCard = document.createElement('div');
+  timerCard.className = 'hud-card';
+  timerCard.style.borderTop = '3px solid #333';
+  timerCard.style.minWidth = '90px';
+  timerCard.innerHTML = `
+    <div class="hud-name" style="color:#555">
+      ${{ longest:'TIME', score:'LIMIT', kills:'KILLS', last:'SURVIVAL' }[lobbyState.winCondition] || 'TIME'}
+    </div>
+    <div class="hud-score" id="hud-timer" style="color:#888; font-size:1em;">—</div>
+  `;
+  // Insert timer in the middle
+  const mid = Math.floor(players.length / 2);
+  hud.insertBefore(timerCard, hud.children[mid] || null);
+}
+ 
+// ═══════════════════════════════════════════════════════════════════════
+// GAME LOOP
+// ═══════════════════════════════════════════════════════════════════════
+ 
+function gameTick(now) {
+  if (!gameState || gameState.over) return;
+  requestAnimationFrame(gameTick);
+ 
+  // Guard: first frame lastTime is 0 — set it and skip to avoid huge dt spike
+  if (gameState.lastTime === 0) {
+    gameState.lastTime = now;
+    draw();
+    return;
   }
-
-  // Head hits body (other snakes)
-  for (const s of state.players) {
-    if (!s.alive) continue;
-    const head = s.body[0];
-    for (const other of state.players) {
-      if (!other.alive) continue;
-      const startAt = other.id === s.id ? 1 : 0;
-      for (let i = startAt; i < other.body.length; i++) {
-        if (other.body[i].x === head.x && other.body[i].y === head.y) {
-          killSnake(s, other.id === s.id ? null : other.id);
-          break;
+ 
+  const dt = Math.min(now - gameState.lastTime, 200); // cap dt at 200ms to avoid spiral
+  gameState.lastTime = now;
+ 
+  gameState.players.forEach(p => {
+    if (!p.alive) {
+      if (p.respawnTimer > 0) {
+        p.respawnTimer -= dt;
+        if (p.respawnTimer <= 0 && gameState.rules.respawn) {
+          respawnPlayer(p);
         }
       }
-      if (!s.alive) break;
+      return;
+    }
+ 
+    const speed = p.tempSpeed !== null ? p.tempSpeed : p.speed;
+    p.tickAccum += dt;
+    if (p.tickAccum < speed) return;
+    p.tickAccum = 0;
+ 
+    // Apply input
+    if (p.inputQueue.length > 0) {
+      const next = p.inputQueue.shift();
+      if (!(next.dx === -p.dx && next.dy === -p.dy && p.body.length > 1)) {
+        p.dx = next.dx;
+        p.dy = next.dy;
+      }
+    }
+ 
+    movePlayer(p);
+  });
+ 
+  gameState.tick++;
+ 
+  // RPG mode: spawn cores
+  if (gameState.mode === 'rpg' || gameState.mode === 'maxrpg') {
+    if (gameState.tick - gameState.rpgCoreSpawnTick > 150) {
+      gameState.rpgCoreSpawnTick = gameState.tick;
+      spawnRPGCore();
     }
   }
-
-  // Head-on collision: both die
-  for (let i = 0; i < heads.length; i++) {
-    for (let j = i + 1; j < heads.length; j++) {
-      if (heads[i].head.x === heads[j].head.x && heads[i].head.y === heads[j].head.y) {
-        killSnake(state.players[heads[i].id], heads[j].id);
-        killSnake(state.players[heads[j].id], heads[i].id);
+ 
+  checkMagnet();
+  checkWinCondition();
+  updateHUD();
+  draw();
+}
+ 
+function movePlayer(p) {
+  const { gridW, gridH, rules } = gameState;
+  const rpg = p.rpg;
+  const head = { x: p.body[0].x + p.dx, y: p.body[0].y + p.dy };
+ 
+  // Wall collision — noWall from rpg overrides rule, or rule wallWrap
+  const wrapWall = rules.wallWrap || (rpg && rpg.noWall);
+  if (wrapWall) {
+    head.x = (head.x + gridW) % gridW;
+    head.y = (head.y + gridH) % gridH;
+  } else {
+    if (head.x < 0 || head.x >= gridW || head.y < 0 || head.y >= gridH) {
+      // Shed on Impact
+      if (rpg && rpg.shedOnImpact && p.body.length > 4) {
+        const shedAmt = Math.max(2, Math.floor(p.body.length * 0.1));
+        p.body.splice(p.body.length - shedAmt);
+        return;
+      }
+      // Soul Insurance (first death only)
+      if (rpg && rpg.soulInsurance && !p.insuranceUsed) {
+        p.insuranceUsed = true;
+        const reviveLen = Math.max(3, Math.floor(p.body.length / 2));
+        p.body = buildSpawnBody(head.x < 0 || head.x >= gridW ? { x: Math.floor(gridW/2), y: p.body[0].y } : { x: p.body[0].x, y: Math.floor(gridH/2) }, p.dx, reviveLen);
+        p.ghost = true;
+        setTimeout(() => { if(p) p.ghost = false; }, 2000);
+        return;
+      }
+      killPlayer(p, null);
+      return;
+    }
+  }
+ 
+  // Self collision
+  if (rules.selfCollide && !p.ghost && !p.phaseActive) {
+    if (p.body.some(s => s.x === head.x && s.y === head.y)) {
+      // Immortal phase auto-triggers
+      if (rpg && rpg.immortalPhase && !p.phaseCD && p.phaseCharges > 0) {
+        triggerPhase(p);
+      } else if (rpg && rpg.soulInsurance && !p.insuranceUsed) {
+        p.insuranceUsed = true;
+        const reviveLen = Math.max(3, Math.floor(p.body.length / 2));
+        p.body = buildSpawnBody(p.body[0], p.dx, reviveLen);
+        p.ghost = true;
+        setTimeout(() => { if(p) p.ghost = false; }, 2000);
+        return;
+      } else {
+        killPlayer(p, null);
+        return;
       }
     }
   }
-
-  renderBoard();
-  renderScoreboard();
-  checkVictory();
-  requestAnimationFrame(tick);
+ 
+  // Inter-player collision
+  if (!p.ghost && !p.phaseActive) {
+    for (const other of gameState.players) {
+      if (other === p || !other.alive) continue;
+      if (rules.headOn && other.body[0].x === head.x && other.body[0].y === head.y) {
+        killPlayer(p, other.id);
+        killPlayer(other, p.id);
+        return;
+      }
+      const bodyHit = other.body.slice(1).some(s => s.x === head.x && s.y === head.y);
+      if (bodyHit) {
+        killPlayer(p, other.id);
+        return;
+      }
+    }
+  }
+ 
+  // Move head
+  p.body.unshift(head);
+ 
+  // Magnet pulls nearby apples
+  if (p.magnet) {
+    gameState.apples = gameState.apples.filter(a => {
+      if (Math.abs(a.x - head.x) + Math.abs(a.y - head.y) <= 3) {
+        collectApple(p, a);
+        return false;
+      }
+      return true;
+    });
+  }
+ 
+  // Apple eating
+  let ate = false;
+  gameState.apples = gameState.apples.filter(a => {
+    if (a.x === head.x && a.y === head.y) {
+      collectApple(p, a);
+      ate = true;
+      return false;
+    }
+    return true;
+  });
+ 
+  // Cannibalism - eat shed pieces
+  if (rpg && rpg.cannibalism && p.shedTailPieces.length > 0) {
+    p.shedTailPieces = p.shedTailPieces.filter(seg => {
+      if (seg.x === head.x && seg.y === head.y) {
+        collectApple(p, { type: 'normal', color: p.color }, 2); // 2x reward
+        return false;
+      }
+      return true;
+    });
+  }
+ 
+  // RPG core eating
+  if (gameState.rpgCores) {
+    gameState.rpgCores = gameState.rpgCores.filter(c => {
+      if (c.x === head.x && c.y === head.y) {
+        applyRPGCore(p, c);
+        return false;
+      }
+      return true;
+    });
+  }
+ 
+  // Growth or shrink tail
+  if (!ate) {
+    if (p.growCount > 0) {
+      p.growCount--;
+    } else {
+      p.body.pop();
+    }
+  }
+ 
+  // Shedding (every N apples shed tails)
+  if (rpg && rpg.sheddingLevel > 0) {
+    const profiles = [null,{a:15,t:2},{a:14,t:3},{a:13,t:4},{a:12,t:4},{a:10,t:5}];
+    const prof = profiles[Math.min(5, rpg.sheddingLevel)];
+    if (prof && p.applesEaten > 0 && p.applesEaten % prof.a === 0) {
+      const shedCount = Math.min(prof.t, p.body.length - 3);
+      for (let s = 0; s < shedCount; s++) {
+        const seg = p.body.pop();
+        if (rpg.cannibalism && seg) p.shedTailPieces.push({ x: seg.x, y: seg.y });
+      }
+    }
+  }
+ 
+  // Respawn missing apples
+  const targetApples = Math.max(2, gameState.players.filter(q => q.alive).length);
+  while (gameState.apples.length < targetApples) {
+    const spot = randomEmptySpot(gameState.players, gameState.apples, gridW, gridH);
+    if (!spot) break;
+    gameState.apples.push(newApple(spot, gameState.mode));
+  }
 }
-
-function checkVictory() {
-  const alive = state.players.filter(p => p.alive);
-  const noRespawnLeft = state.players.filter(p => p.lives > 0);
-  if (state.victory === 'lastAlive' && alive.length <= 1 && noRespawnLeft.length <= 1) {
-    endRound(alive[0] || noRespawnLeft[0]);
+ 
+function collectApple(p, apple, multiplier = 1) {
+  const rpg = p.rpg;
+ 
+  // Gold apple bonus
+  const goldMult = rpg ? (1 + Math.min(5, rpg.goldAppleLevel) * 0.20) : 1;
+ 
+  // Phase XP/gold swap
+  const phaseGold = (p.phaseActive && rpg && rpg.phaseGreed) ? 1.75 : 1;
+  const phaseXP   = (p.phaseActive && rpg && rpg.phaseExpertise) ? 1.75 : 1;
+ 
+  const scoreGain = Math.ceil(10 * multiplier * goldMult * phaseGold);
+  p.score += scoreGain;
+ 
+  // Growth: evo level affects how much you grow
+  const evo = rpg ? rpg.evo : 1;
+  p.growCount += (evo) * multiplier;
+ 
+  // Phase charge reduction on eat
+  if (rpg && rpg.phaseCharge && p.phaseCD) {
+    reducePhaseCooldown(p, 0.5);
+  }
+ 
+  p.applesEaten += multiplier;
+ 
+  // Echo Growth: every 5th apple = bonus growth
+  if (rpg && rpg.echoGrowthLevel > 0) {
+    const prev = p.applesEaten - multiplier;
+    const triggers = Math.floor(p.applesEaten / 5) - Math.floor(prev / 5);
+    if (triggers > 0) p.growCount += 2 * rpg.echoGrowthLevel * triggers;
+  }
+ 
+  // Dual apple chance
+  if (rpg && rpg.dualAppleLevel > 0 && apple.type !== 'bonus') {
+    const dualChance = Math.min(55, rpg.dualAppleLevel * 11);
+    if (Math.random() * 100 < dualChance) {
+      const spot = randomEmptySpot(gameState.players, gameState.apples, gameState.gridW, gameState.gridH);
+      if (spot) gameState.apples.push(newApple(spot, gameState.mode));
+    }
+  }
+ 
+  // Carnival ability
+  if (gameState.mode === 'carnival' && apple.type === 'ability' && apple.ability) {
+    apple.ability.effect(p, gameState.players);
+    gameState.carnivalAbilityToast = { name: apple.ability.name, color: apple.ability.color, player: p.name, timer: 120 };
+  }
+}
+ 
+function buildSpawnBody(pos, dx, length) {
+  const body = [];
+  for (let i = 0; i < length; i++) body.push({ x: pos.x - dx * i, y: pos.y });
+  return body;
+}
+ 
+// Phase trigger for a player
+function triggerPhase(p) {
+  if (!p.rpg || !p.rpg.hasPhase) return;
+  if (p.phaseCD || p.phaseCharges <= 0) return;
+  p.phaseActive = true;
+  p.phaseCharges--;
+  const dur = p.phaseDuration;
+  clearTimeout(p.phaseTimeout);
+  p.phaseTimeout = setTimeout(() => {
+    p.phaseActive = false;
+    if (p.phaseCharges <= 0) {
+      p.phaseCD = true;
+      const cdMs = 1500 + Math.floor(dur * 1.25);
+      clearTimeout(p.phaseCDTimer);
+      p.phaseCDTimer = setTimeout(() => {
+        p.phaseCD = false;
+        p.phaseCharges = p.rpg.dualPhase ? 2 : 1;
+      }, cdMs);
+    }
+  }, dur);
+}
+ 
+function reducePhaseCooldown(p, seconds) {
+  if (!p.phaseCD) return;
+  clearTimeout(p.phaseCDTimer);
+  const remain = Math.max(0, (p._phaseCDEnd || 0) - Date.now() - seconds * 1000);
+  if (remain <= 0) {
+    p.phaseCD = false;
+    p.phaseCharges = p.rpg && p.rpg.dualPhase ? 2 : 1;
+  } else {
+    p._phaseCDEnd = Date.now() + remain;
+    p.phaseCDTimer = setTimeout(() => {
+      p.phaseCD = false;
+      p.phaseCharges = p.rpg && p.rpg.dualPhase ? 2 : 1;
+    }, remain);
+  }
+}
+ 
+function newApple(spot, mode) {
+  const isAbility = mode === 'carnival' && Math.random() < 0.35;
+  const ab = isAbility ? CARNIVAL_ABILITIES[Math.floor(Math.random() * CARNIVAL_ABILITIES.length)] : null;
+  return {
+    x: spot.x, y: spot.y,
+    type: isAbility ? 'ability' : 'normal',
+    color: isAbility ? ab.color : '#ff2e63',
+    ability: ab,
+    label: isAbility ? ab.name.substring(0, 3) : null,
+  };
+}
+ 
+// ═══════════════════════════════════════════════════════════════════════
+// RPG CORES
+// ═══════════════════════════════════════════════════════════════════════
+ 
+const RPG_CORES = [
+  { id: 'speed',   color: '#ff4500', label: 'SPD', effect: p => { p.speed = Math.max(40, p.speed - 10); } },
+  { id: 'grow',    color: '#4ecca3', label: 'GRW', effect: p => { p.growCount += 4; } },
+  { id: 'ghost',   color: '#a020f0', label: 'GHO', effect: p => { p.ghost = true; setTimeout(() => p.ghost = false, 3000); } },
+  { id: 'score',   color: '#ffd700', label: 'SCR', effect: p => { p.score += 50; } },
+];
+ 
+function spawnRPGCore() {
+  if (!gameState.rpgCores) gameState.rpgCores = [];
+  if (gameState.rpgCores.length >= 3) return;
+  const spot = randomEmptySpot(gameState.players, [...gameState.apples, ...(gameState.rpgCores || [])], gameState.gridW, gameState.gridH);
+  if (!spot) return;
+  const core = RPG_CORES[Math.floor(Math.random() * RPG_CORES.length)];
+  gameState.rpgCores.push({ x: spot.x, y: spot.y, ...core });
+}
+ 
+function applyRPGCore(p, core) {
+  core.effect(p);
+  p.rpgCoresCollected = p.rpgCoresCollected || [];
+  p.rpgCoresCollected.push(core.id);
+}
+ 
+// ═══════════════════════════════════════════════════════════════════════
+// DEATH & RESPAWN
+// ═══════════════════════════════════════════════════════════════════════
+ 
+function killPlayer(p, killedById) {
+  p.alive = false;
+  p.deathCount++;
+ 
+  if (killedById !== null) {
+    const killer = gameState.players.find(o => o.id === killedById);
+    if (killer) killer.kills++;
+  }
+ 
+  if (gameState.rules.respawn) {
+    p.respawnTimer = 3000; // 3 sec respawn
+  }
+}
+ 
+function respawnPlayer(p) {
+  const { gridW, gridH } = gameState;
+  const spot = randomEmptySpot(gameState.players, gameState.apples, gridW, gridH);
+  if (!spot) return;
+ 
+  const dx = Math.random() < 0.5 ? 1 : -1;
+  p.body = [
+    { x: spot.x, y: spot.y },
+    { x: spot.x - dx, y: spot.y },
+    { x: spot.x - dx*2, y: spot.y },
+  ];
+  p.dx = dx; p.dy = 0;
+  p.alive = true;
+  p.ghost = true;
+  p.growCount = 0;
+  p.inputQueue = [];
+  setTimeout(() => { if (p) p.ghost = false; }, 2000); // respawn invincibility
+}
+ 
+// ═══════════════════════════════════════════════════════════════════════
+// WIN CONDITION
+// ═══════════════════════════════════════════════════════════════════════
+ 
+function checkWinCondition() {
+  const { players, winCondition, rules, winLimit, matchStartTime } = gameState;
+  const alive = players.filter(p => p.alive);
+ 
+  // Last to live — no timer, just survival
+  if (winCondition === 'last') {
+    if (!rules.respawn && alive.length <= 1) {
+      endGame(alive[0] || null);
+    }
     return;
   }
-  if (state.victory === 'longest') {
-    const max = Math.max(...state.players.map(p => p.body.length));
-    if (max >= 22) endRound(state.players.find(p => p.body.length === max));
+ 
+  // Score limit
+  if (winCondition === 'score') {
+    const leader = [...players].sort((a, b) => b.score - a.score)[0];
+    if (leader && leader.score >= winLimit) { endGame(leader); return; }
   }
-  if (state.victory === 'points') {
-    const max = Math.max(...state.players.map(p => p.points));
-    if (max >= 20) endRound(state.players.find(p => p.points === max));
+ 
+  // Kill limit
+  if (winCondition === 'kills') {
+    const leader = [...players].sort((a, b) => b.kills - a.kills)[0];
+    if (leader && leader.kills >= winLimit) { endGame(leader); return; }
   }
-  if (state.victory === 'kills') {
-    const max = Math.max(...state.players.map(p => p.kills));
-    if (max >= 6) endRound(state.players.find(p => p.kills === max));
-  }
-}
-
-function endRound(winner) {
-  state.running = false;
-  const intro = document.getElementById('intro');
-  intro.style.display = 'grid';
-  intro.innerHTML = `<div><h2>Round Over</h2><p>${winner ? winner.name : 'No one'} wins by <b>${document.getElementById('victory').selectedOptions[0].textContent}</b>.</p><p>Press <span class="kbd">Space</span> to restart.</p></div>`;
-}
-
-function drawSnake(s) {
-  ctx.save();
-  ctx.fillStyle = s.color;
-  ctx.strokeStyle = s.pattern === 'glow' ? '#fff' : s.color;
-  ctx.lineWidth = s.pattern === 'dashed' ? 1 : 2;
-  if (s.pattern === 'dashed') ctx.setLineDash([4, 3]);
-
-  s.body.forEach((seg, i) => {
-    const px = seg.x * tile;
-    const py = seg.y * tile;
-    ctx.fillRect(px + 1, py + 1, tile - 2, tile - 2);
-    if (s.pattern !== 'solid') ctx.strokeRect(px + 2, py + 2, tile - 4, tile - 4);
-    if (i === 0) {
-      ctx.fillStyle = '#fff';
-      ctx.fillRect(px + tile * 0.25, py + tile * 0.25, 3, 3);
-      ctx.fillRect(px + tile * 0.65, py + tile * 0.25, 3, 3);
-      ctx.fillStyle = s.color;
+ 
+  // Time limit (longest snake) — winLimit is in seconds
+  if (winCondition === 'longest') {
+    const elapsed = (Date.now() - matchStartTime) / 1000;
+    if (elapsed >= winLimit) {
+      const winner = [...players].sort((a, b) => b.body.length - a.body.length)[0];
+      endGame(winner);
     }
-  });
-
-  if (s.pattern === 'glow') {
-    ctx.shadowColor = s.color;
-    ctx.shadowBlur = 12;
   }
-  ctx.restore();
 }
-
-function renderBoard() {
+ 
+function endGame(winner) {
+  gameState.over = true;
+  gameState.winner = winner;
+ 
+  const overlay = document.getElementById('game-overlay');
+  const title = document.getElementById('overlay-title');
+  const sub = document.getElementById('overlay-sub');
+ 
+  if (winner) {
+    title.textContent = winner.name + ' WINS';
+    title.style.color = winner.color;
+    title.style.textShadow = `0 0 20px ${winner.color}`;
+    const scores = gameState.players.map(p =>
+      `${p.name}: len ${p.body.length} · score ${p.score} · kills ${p.kills}`
+    ).join('\n');
+    sub.textContent = scores;
+  } else {
+    title.textContent = 'DRAW';
+    title.style.color = '#888';
+    title.style.textShadow = 'none';
+    sub.textContent = 'No winner this round';
+  }
+ 
+  overlay.classList.add('show');
+}
+ 
+// ═══════════════════════════════════════════════════════════════════════
+// MAGNET
+// ═══════════════════════════════════════════════════════════════════════
+ 
+function checkMagnet() {
+  // Handled per-player in movePlayer
+}
+ 
+// ═══════════════════════════════════════════════════════════════════════
+// HUD UPDATE
+// ═══════════════════════════════════════════════════════════════════════
+ 
+function updateHUD() {
+  const { winCondition, winLimit, matchStartTime } = gameState;
+ 
+  gameState.players.forEach(p => {
+    const scoreEl = document.getElementById(`hud-score-${p.id}`);
+    const statusEl = document.getElementById(`hud-status-${p.id}`);
+    if (!scoreEl) return;
+ 
+    let displayScore;
+    if (winCondition === 'kills') displayScore = `${p.kills} kills`;
+    else if (winCondition === 'score') displayScore = `${p.score} pts`;
+    else if (winCondition === 'longest') displayScore = `len ${p.body.length}`;
+    else displayScore = p.alive ? 'ALIVE' : 'DEAD';
+    scoreEl.textContent = displayScore;
+ 
+    const parts = [];
+    if (!p.alive && p.respawnTimer > 0) parts.push(`↺ ${Math.ceil(p.respawnTimer/1000)}s`);
+    if (p.phaseActive) parts.push('⚡PHASE');
+    else if (p.phaseCD) parts.push('CD');
+    else if (p.rpg && p.rpg.hasPhase && p.phaseCharges > 0) parts.push(`⚡×${p.phaseCharges}`);
+    if (p.ghost && !p.phaseActive) parts.push('GHOST');
+    if (p.magnet) parts.push('🧲');
+    if (p.rpg && p.rpg.soulInsurance && !p.insuranceUsed) parts.push('INS✓');
+    statusEl.textContent = parts.join(' · ');
+ 
+    const hudCard = document.getElementById(`hud-${p.id}`);
+    if (hudCard) hudCard.style.opacity = p.alive ? '1' : '0.45';
+  });
+ 
+  const timerEl = document.getElementById('hud-timer');
+  if (timerEl) {
+    if (winCondition === 'longest') {
+      const elapsed = (Date.now() - matchStartTime) / 1000;
+      const remaining = Math.max(0, winLimit - elapsed);
+      const m = Math.floor(remaining / 60);
+      const s = Math.floor(remaining % 60);
+      timerEl.textContent = `${m}:${s.toString().padStart(2,'0')}`;
+      timerEl.style.color = remaining < 10 ? '#ff4444' : '#888';
+    } else if (winCondition === 'score') {
+      const leader = [...gameState.players].sort((a,b) => b.score - a.score)[0];
+      timerEl.textContent = `${leader ? leader.score : 0} / ${winLimit}`;
+    } else if (winCondition === 'kills') {
+      const leader = [...gameState.players].sort((a,b) => b.kills - a.kills)[0];
+      timerEl.textContent = `${leader ? leader.kills : 0} / ${winLimit}`;
+    } else {
+      timerEl.textContent = '';
+    }
+  }
+}
+ 
+// ═══════════════════════════════════════════════════════════════════════
+// DRAW
+// ═══════════════════════════════════════════════════════════════════════
+ 
+function draw() {
+  const { players, apples, gridW, gridH, carnivalAbilityToast, mode } = gameState;
+ 
   ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  // subtle grid
-  ctx.strokeStyle = 'rgba(255,255,255,.06)';
-  ctx.lineWidth = 1;
-  for (let i = 0; i <= grid; i++) {
-    const p = i * tile;
-    ctx.beginPath(); ctx.moveTo(p, 0); ctx.lineTo(p, canvas.height); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(0, p); ctx.lineTo(canvas.width, p); ctx.stroke();
-  }
-
-  for (const apple of state.apples) {
-    ctx.fillStyle = apple.kind === 'main' ? '#ff4b4b' : '#a020f0';
-    ctx.beginPath();
-    ctx.arc(apple.x * tile + tile / 2, apple.y * tile + tile / 2, tile * 0.32, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  for (const s of state.players) if (s.alive) drawSnake(s);
-}
-
-function renderScoreboard() {
-  const board = document.getElementById('scoreboard');
-  board.innerHTML = state.players.map(p => `
-    <div class="score-row" style="border-left-color:${p.color}">
-      <strong>${p.name}</strong>
-      <span>${p.body.length}</span>
-      <span>${p.points}</span>
-      <span>${p.kills}</span>
-      <span>${Math.max(0,p.lives)}</span>
-    </div>
-  `).join('');
-}
-
-function openConfig(show) {
-  document.getElementById('configMenu').style.display = show ? 'grid' : 'none';
-}
-
-function initConfigUI() {
-  const playersBox = document.getElementById('players');
-  playersBox.innerHTML = '';
-  for (let i = 0; i < 3; i++) {
-    const c = defaultConfigs[i];
-    const div = document.createElement('div');
-    div.className = 'player-card';
-    div.dataset.player = i;
-    div.innerHTML = `
-      <div class="row"><strong>Player ${i+1}</strong><span class="tiny">${i===0?'Arrows':i===1?'WASD':'IJKL'}</span></div>
-      <div class="row" style="margin-top:6px;">
-        <input class="pname" value="${c.name}" />
-        <input class="pcolor" type="color" value="${c.color}" />
-      </div>
-      <div class="row" style="margin-top:6px;">
-        <select class="ppattern">
-          <option value="solid">Solid</option>
-          <option value="dashed" ${c.pattern==='dashed'?'selected':''}>Dashed</option>
-          <option value="glow" ${c.pattern==='glow'?'selected':''}>Glow</option>
-        </select>
-        <input class="pspeed" type="number" min="5" max="12" value="7" title="Base Speed" />
-      </div>
-    `;
-    playersBox.appendChild(div);
-  }
-}
-
-document.addEventListener('keydown', (e) => {
-  const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
-  if (key === '3') {
-    openConfig(document.getElementById('configMenu').style.display !== 'grid');
-    return;
-  }
-  if (key === ' ') {
-    if (!state.running) {
-      document.getElementById('intro').style.display = 'none';
-      state.running = true;
-      document.getElementById('mode').dispatchEvent(new Event('change'));
-      document.getElementById('victory').dispatchEvent(new Event('change'));
-      requestAnimationFrame(tick);
+ 
+  // Subtle grid
+  ctx.strokeStyle = 'rgba(255,255,255,0.025)';
+  ctx.lineWidth = 0.5;
+  for (let x = 0; x <= gridW; x++) { ctx.beginPath(); ctx.moveTo(x*CELL,0); ctx.lineTo(x*CELL,canvas.height); ctx.stroke(); }
+  for (let y = 0; y <= gridH; y++) { ctx.beginPath(); ctx.moveTo(0,y*CELL); ctx.lineTo(canvas.width,y*CELL); ctx.stroke(); }
+ 
+  // Apples
+  apples.forEach(a => {
+    ctx.fillStyle = a.color;
+    ctx.shadowColor = a.color;
+    ctx.shadowBlur = 8;
+    ctx.fillRect(a.x*CELL+3, a.y*CELL+3, CELL-6, CELL-6);
+    ctx.shadowBlur = 0;
+ 
+    if (a.label) {
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 7px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(a.label, a.x*CELL+CELL/2, a.y*CELL+CELL/2+3);
     }
-    return;
-  }
-  state.players.forEach(p => changeDir(p, key));
-});
-
-document.getElementById('mode').addEventListener('change', (e) => state.mode = e.target.value);
-document.getElementById('victory').addEventListener('change', (e) => state.victory = e.target.value);
-document.getElementById('respawn').addEventListener('change', (e) => state.respawn = e.target.checked);
-document.getElementById('playerCount').addEventListener('change', resetGame);
-
-document.getElementById('resetCfg').addEventListener('click', () => {
-  initConfigUI();
-  resetGame();
-});
-
-document.getElementById('loadSave').addEventListener('click', () => {
-  const raw = document.getElementById('saveData').value.trim();
-  if (!raw) return;
-  try {
-    const data = JSON.parse(raw);
-    if (!Array.isArray(data)) throw new Error('Expected an array');
-    data.slice(0, 3).forEach((d, i) => {
-      const row = document.querySelector(`[data-player="${i}"]`);
-      if (!row) return;
-      if (d.name) row.querySelector('.pname').value = d.name;
-      if (d.color) row.querySelector('.pcolor').value = d.color;
-      if (d.pattern) row.querySelector('.ppattern').value = d.pattern;
-      if (d.speed) row.querySelector('.pspeed').value = d.speed;
-      row.dataset.startingLength = d.startingLength || '';
-      row.dataset.coreLevel = d.coreLevel || '';
+  });
+ 
+  // RPG Cores
+  if (gameState.rpgCores) {
+    gameState.rpgCores.forEach(c => {
+      ctx.fillStyle = c.color;
+      ctx.shadowColor = c.color;
+      ctx.shadowBlur = 12;
+      ctx.beginPath();
+      ctx.arc(c.x*CELL+CELL/2, c.y*CELL+CELL/2, CELL/2-2, 0, Math.PI*2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+ 
+      ctx.fillStyle = '#000';
+      ctx.font = 'bold 7px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(c.label, c.x*CELL+CELL/2, c.y*CELL+CELL/2+3);
     });
-    resetGame();
-  } catch (err) {
-    alert('Invalid save JSON. Use an array of snake configs.');
+  }
+ 
+  // Snakes
+  players.forEach(p => {
+    if (!p.alive && p.respawnTimer <= 0 && !gameState.rules.respawn) return;
+ 
+    const isPhasing = p.phaseActive;
+    const alpha = isPhasing ? 0.35 : (!p.alive ? 0.15 : p.ghost ? 0.45 : 1);
+    ctx.globalAlpha = alpha;
+ 
+    p.body.forEach((seg, i) => {
+      const isHead = i === 0;
+      const isTail = i === p.body.length - 1;
+      const pad = isHead ? 1 : isTail ? 4 : 2;
+ 
+      if (isHead) {
+        ctx.fillStyle = isPhasing ? 'rgba(255,255,255,0.6)' : '#fff';
+        ctx.shadowColor = p.color;
+        ctx.shadowBlur = isPhasing ? 18 : 10;
+      } else {
+        ctx.fillStyle = p.color;
+        ctx.shadowColor = p.color;
+        ctx.shadowBlur = 4;
+      }
+ 
+      ctx.fillRect(seg.x*CELL+pad, seg.y*CELL+pad, CELL-pad*2, CELL-pad*2);
+      ctx.shadowBlur = 0;
+    });
+ 
+    // Shed tail pieces (cannibalism)
+    if (p.shedTailPieces && p.shedTailPieces.length > 0) {
+      ctx.globalAlpha = 0.7;
+      p.shedTailPieces.forEach(seg => {
+        ctx.fillStyle = 'rgba(160,32,240,0.85)';
+        ctx.fillRect(seg.x*CELL+5, seg.y*CELL+5, CELL-10, CELL-10);
+      });
+    }
+ 
+    // Name tag above head
+    if (p.alive && players.length > 1) {
+      const head = p.body[0];
+      ctx.fillStyle = p.color;
+      ctx.font = 'bold 9px monospace';
+      ctx.textAlign = 'center';
+      ctx.globalAlpha = 0.9;
+      ctx.fillText(p.name, head.x*CELL+CELL/2, head.y*CELL-3);
+    }
+ 
+    ctx.globalAlpha = 1;
+  });
+ 
+  // Carnival ability toast
+  if (carnivalAbilityToast && carnivalAbilityToast.timer > 0) {
+    carnivalAbilityToast.timer--;
+    const t = gameState.carnivalAbilityToast;
+    ctx.fillStyle = t.color;
+    ctx.font = 'bold 14px monospace';
+    ctx.textAlign = 'center';
+    ctx.globalAlpha = Math.min(1, t.timer / 30);
+    ctx.shadowColor = t.color;
+    ctx.shadowBlur = 10;
+    ctx.fillText(`${t.player}: ${t.name}`, canvas.width/2, canvas.height/2 - 20);
+    ctx.shadowBlur = 0;
+    ctx.globalAlpha = 1;
+  }
+ 
+  // Respawn countdown overlay per dead player
+  players.forEach(p => {
+    if (!p.alive && p.respawnTimer > 0) {
+      const head = p.body[0] || { x: gameState.gridW/2, y: gameState.gridH/2 };
+      ctx.fillStyle = p.color;
+      ctx.font = 'bold 11px monospace';
+      ctx.textAlign = 'center';
+      ctx.globalAlpha = 0.8;
+      ctx.fillText(`↺ ${Math.ceil(p.respawnTimer/1000)}`, head.x*CELL+CELL/2, head.y*CELL+CELL/2);
+      ctx.globalAlpha = 1;
+    }
+  });
+ 
+  // Progress bar at bottom
+  if (gameState.winCondition === 'longest') {
+    const elapsed = (Date.now() - gameState.matchStartTime) / 1000;
+    const pct = Math.min(1, elapsed / gameState.winLimit);
+    ctx.fillStyle = 'rgba(255,255,255,0.06)';
+    ctx.fillRect(0, canvas.height - 4, canvas.width, 4);
+    const barColor = pct > 0.8 ? 'rgba(255,68,68,0.7)' : 'rgba(0,251,255,0.5)';
+    ctx.fillStyle = barColor;
+    ctx.fillRect(0, canvas.height - 4, canvas.width * pct, 4);
+  } else if (gameState.winCondition === 'score') {
+    const leader = [...gameState.players].sort((a,b) => b.score - a.score)[0];
+    const pct = Math.min(1, (leader ? leader.score : 0) / gameState.winLimit);
+    ctx.fillStyle = 'rgba(255,255,255,0.06)';
+    ctx.fillRect(0, canvas.height - 4, canvas.width, 4);
+    ctx.fillStyle = 'rgba(255,215,0,0.6)';
+    ctx.fillRect(0, canvas.height - 4, canvas.width * pct, 4);
+  } else if (gameState.winCondition === 'kills') {
+    const leader = [...gameState.players].sort((a,b) => b.kills - a.kills)[0];
+    const pct = Math.min(1, (leader ? leader.kills : 0) / gameState.winLimit);
+    ctx.fillStyle = 'rgba(255,255,255,0.06)';
+    ctx.fillRect(0, canvas.height - 4, canvas.width, 4);
+    ctx.fillStyle = 'rgba(255,46,99,0.7)';
+    ctx.fillRect(0, canvas.height - 4, canvas.width * pct, 4);
+  }
+}
+ 
+// ═══════════════════════════════════════════════════════════════════════
+// UTILS
+// ═══════════════════════════════════════════════════════════════════════
+ 
+function randomEmptySpot(players, apples, gridW, gridH) {
+  const occupied = new Set();
+  players.forEach(p => p.body && p.body.forEach(s => occupied.add(`${s.x},${s.y}`)));
+  apples.forEach(a => a && occupied.add(`${a.x},${a.y}`));
+ 
+  const free = [];
+  for (let x = 0; x < gridW; x++) {
+    for (let y = 0; y < gridH; y++) {
+      if (!occupied.has(`${x},${y}`)) free.push({ x, y });
+    }
+  }
+  if (free.length === 0) return null;
+  return free[Math.floor(Math.random() * free.length)];
+}
+ 
+function goLobby() {
+  document.getElementById('game-screen').classList.remove('active');
+  document.getElementById('lobby').classList.add('active');
+  gameState = null;
+}
+ 
+// ═══════════════════════════════════════════════════════════════════════
+// INPUT
+// ═══════════════════════════════════════════════════════════════════════
+ 
+window.addEventListener('keydown', e => {
+  const tag = (e.target && e.target.tagName ? e.target.tagName : '').toLowerCase();
+  if (tag === 'input' || tag === 'textarea') return;
+ 
+  if (!gameState || gameState.over) return;
+ 
+  const key = e.key;
+ 
+  gameState.players.forEach(p => {
+    if (!p.alive) return;
+    const k = p.keys;
+    let dir = null;
+    if (key === k.up)    dir = { dx: 0,  dy: -1 };
+    if (key === k.down)  dir = { dx: 0,  dy:  1 };
+    if (key === k.left)  dir = { dx: -1, dy:  0 };
+    if (key === k.right) dir = { dx: 1,  dy:  0 };
+    if (dir) {
+      if (p.inputQueue.length < 3) p.inputQueue.push(dir);
+      e.preventDefault();
+    }
+  });
+ 
+  // Phase trigger: Space = P1, Shift = P2, Tab = P3
+  const phaseKeys = { ' ': 0, 'Shift': 1, 'Tab': 2 };
+  if (phaseKeys[key] !== undefined) {
+    const p = gameState.players[phaseKeys[key]];
+    if (p && p.alive && p.rpg && p.rpg.hasPhase) {
+      triggerPhase(p);
+      e.preventDefault();
+    }
   }
 });
-
-initConfigUI();
-resetGame();
-renderBoard();
+ 
+// ═══════════════════════════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════════════════════════
+ 
+buildLobby();
+validateStart();
+ 
+// Update rule button UI on load
+['respawn','wallWrap','headOn','selfCollide'].forEach(rule => {
+  const val = lobbyState.rules[rule];
+  const prefix = rule === 'respawn' ? 'respawn' : rule === 'wallWrap' ? 'wall' : rule === 'headOn' ? 'headon' : 'self';
+  const onEl = document.getElementById(`${prefix}-on`);
+  const offEl = document.getElementById(`${prefix}-off`);
+  if (onEl) onEl.classList.toggle('on', val);
+  if (offEl) offEl.classList.toggle('on', !val);
+});
 </script>
 </body>
 </html>
+ 
+
+
