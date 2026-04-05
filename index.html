@@ -314,7 +314,7 @@
 }
 
 .credits-roll.scrolling {
-    animation: creditsRoll 12s linear forwards;
+    animation: creditsRoll 14s linear forwards;
 }
 
 @keyframes creditsRoll {
@@ -2095,8 +2095,13 @@ function openCredits(endingText = "Thanks for playing Snake 2.") {
     const roll = document.getElementById("credits-roll");
     if (roll) {
         roll.classList.remove("scrolling");
-        void roll.offsetWidth;
-        roll.classList.add("scrolling");
+        roll.style.transform = "translateY(100%)";
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                roll.classList.add("scrolling");
+                roll.style.transform = "";
+            });
+        });
     }
 
     defaultMusic.pause();
