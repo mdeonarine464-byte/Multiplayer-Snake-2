@@ -685,6 +685,8 @@
     let endingActive = false;
     let endingAwaitingClick = false;
     let queuedEndingText = "Thanks for playing Snake 2.";
+    let hellRetraceTimer = null;
+    let snakeTrail = [];
     const IMAGE_SKIN_ID = 'triple-image';
     const snakeImageSkinAssets = {
         head: new Image(),
@@ -712,13 +714,57 @@
         endingMusic.play().catch(() => {});
     }
 
-    function beginEndingSequence(endingText) {
+    function beginEndingSequence(endingText, options = {}) {
         clearTimeout(phaseTimeout);
         clearTimeout(phaseCooldownTimer);
         isPaused = true;
         modalActive = true;
         playEndingMusic();
+
+        if (options.hellRetrace) {
+            runHellEndingRetrace(endingText);
+            return;
+        }
+
         queueEndingCredits(endingText);
+    }
+
+    function runHellEndingRetrace(endingText) {
+        if (hellRetraceTimer) clearInterval(hellRetraceTimer);
+
+        const history = snakeTrail.length > 0
+            ? snakeTrail.map(seg => ({ x: seg.x, y: seg.y }))
+            : snake.map(seg => ({ x: seg.x, y: seg.y }));
+        let retraceIndex = Math.max(0, history.length - 2);
+
+        const finishHellEnding = () => {
+            if (hellRetraceTimer) {
+                clearInterval(hellRetraceTimer);
+                hellRetraceTimer = null;
+            }
+            if (snake.length > 0) {
+                snake = [snake[0]];
+            }
+            particles = [];
+            renderGameFrame({ snakeHeadOverride: '#ffffff', disableParticles: true });
+            setTimeout(() => startCredits(endingText), 280);
+        };
+
+        renderGameFrame({ snakeHeadOverride: '#ffffff', disableParticles: true });
+        hellRetraceTimer = setInterval(() => {
+            if (snake.length > 1) snake.pop();
+
+            if (retraceIndex >= 0 && snake.length > 0) {
+                snake[0] = { x: history[retraceIndex].x, y: history[retraceIndex].y };
+                retraceIndex--;
+            }
+
+            renderGameFrame({ snakeHeadOverride: '#ffffff', disableParticles: true });
+
+            if (snake.length <= 1 && retraceIndex < 0) {
+                finishHellEnding();
+            }
+        }, 55);
     }
 
     function queueEndingCredits(endingText) {
@@ -1409,7 +1455,7 @@ if (data.cheatActive === true) {
 } else if (data.cardLinked === true){
     data.endingHellUnlocked = true;
     save();
-    beginEndingSequence("HELL ENDING HERE!");
+    beginEndingSequence("HELL ENDING HERE!", { hellRetrace: true });
 } else {
     data.endingAverageUnlocked = true;
     save();
@@ -2652,6 +2698,92 @@ window.addEventListener("keydown", (e) => {
   }
 });
 
+    function renderGameFrame(options = {}) {
+        const { snakeHeadOverride = null, disableParticles = false } = options;
+
+        drawPlayfieldBackground();
+        const primaryAppleColor = getGoldAppleRenderColor(0);
+        ctx.fillStyle = primaryAppleColor;
+        if (data.neonEnabled) {
+            ctx.shadowColor = primaryAppleColor;
+            ctx.shadowBlur = 10;
+        } else {
+            ctx.shadowColor = 'transparent';
+            ctx.shadowBlur = 0;
+        }
+        if (food) ctx.fillRect(food.x*grid+2, food.y*grid+2, grid-4, grid-4);
+        if (bonusFood) {
+            const bonusAppleColor = getGoldAppleRenderColor(1);
+            ctx.fillStyle = bonusAppleColor;
+            if (data.neonEnabled) ctx.shadowColor = bonusAppleColor;
+            ctx.fillRect(bonusFood.x*grid+2, bonusFood.y*grid+2, grid-4, grid-4);
+        }
+        ctx.shadowBlur = 0;
+        ctx.shadowColor = 'transparent';
+        if (soulHusk && soulHusk.segments) {
+            soulHusk.segments.forEach((seg, idx) => {
+                const pad = idx === 0 ? 3 : 4;
+                ctx.fillStyle = idx === 0 ? 'rgba(210, 120, 255, 0.95)' : 'rgba(165, 85, 240, 0.9)';
+                ctx.fillRect(seg.x * grid + pad, seg.y * grid + pad, grid - pad * 2, grid - pad * 2);
+                ctx.strokeStyle = 'rgba(245, 191, 255, 0.8)';
+                ctx.lineWidth = 1;
+                ctx.strokeRect(seg.x * grid + pad, seg.y * grid + pad, grid - pad * 2, grid - pad * 2);
+            });
+        }
+        if (data.cannibalism && shedTailPieces.length > 0) {
+            shedTailPieces.forEach(seg => {
+                ctx.fillStyle = 'rgba(170, 95, 230, 0.9)';
+                ctx.fillRect(seg.x * grid + 5, seg.y * grid + 5, grid - 10, grid - 10);
+                ctx.strokeStyle = 'rgba(240, 200, 255, 0.9)';
+                ctx.lineWidth = 1;
+                ctx.strokeRect(seg.x * grid + 5, seg.y * grid + 5, grid - 10, grid - 10);
+            });
+        }
+        if (isPhasing && data.phasePremonition && nextAppleLocation && Date.now() < phasePreviewUntil) {
+            ctx.strokeStyle = 'rgba(160,32,240,0.95)';
+            ctx.lineWidth = 3;
+            ctx.strokeRect(nextAppleLocation.x*grid+3, nextAppleLocation.y*grid+3, grid-6, grid-6);
+            ctx.fillStyle = 'rgba(160,32,240,0.22)';
+            ctx.fillRect(nextAppleLocation.x*grid+4, nextAppleLocation.y*grid+4, grid-8, grid-8);
+        }
+
+        if (!disableParticles && data.neonEnabled && (data.owned.indexOf(data.skin) >= 3 || isPhasing || cheatActive)) {
+            particles.push({x: snake[0].x*grid+10, y: snake[0].y*grid+10, life: 1, c: isPhasing ? "white" : getActiveSnakeColor()});
+        }
+        particles = (!disableParticles && data.neonEnabled)
+            ? particles.filter(p => { p.life -= 0.1; ctx.globalAlpha = p.life; ctx.fillStyle = p.c; ctx.beginPath(); ctx.arc(p.x, p.y, 5, 0, Math.PI*2); ctx.fill(); return p.life > 0; })
+            : [];
+        ctx.globalAlpha = 1;
+
+        snake.forEach((s, i) => {
+            if (isPhasing) ctx.globalAlpha = 0.5;
+
+            if (snakeHeadOverride && i === 0) {
+                const inset = 2;
+                ctx.fillStyle = snakeHeadOverride;
+                ctx.fillRect(s.x * grid + inset, s.y * grid + inset, grid - inset * 2, grid - inset * 2);
+                if (data.neonEnabled) {
+                    ctx.strokeStyle = 'rgba(255,255,255,0.95)';
+                    ctx.lineWidth = 1.5;
+                    ctx.strokeRect(s.x * grid + inset, s.y * grid + inset, grid - inset * 2, grid - inset * 2);
+                }
+            } else if (data.skin === IMAGE_SKIN_ID && !isPhasing && !cheatActive) {
+                const isTail = i === snake.length - 1;
+                if (i === 0) {
+                    drawPatternedSnakeSegment(s, true);
+                } else if (isTail) {
+                    if (!drawTailSegmentImage(s)) drawPatternedSnakeSegment(s, false);
+                } else {
+                    if (!drawBodySegmentImage(s)) drawPatternedSnakeSegment(s, false);
+                }
+            } else {
+                drawPatternedSnakeSegment(s, i === 0);
+            }
+
+            ctx.globalAlpha = 1;
+        });
+    }
+
     function gameLoop() {
         
         if (endingActive) return;
@@ -2766,75 +2898,11 @@ if (appleMoveTick >= appleMoveRate) {
             } else snake.pop();
         }
         
-        drawPlayfieldBackground();
-        const primaryAppleColor = getGoldAppleRenderColor(0);
-        ctx.fillStyle = primaryAppleColor;
-        if (data.neonEnabled) {
-            ctx.shadowColor = primaryAppleColor;
-            ctx.shadowBlur = 10;
-        } else {
-            ctx.shadowColor = 'transparent';
-            ctx.shadowBlur = 0;
-        }
-        if (food) ctx.fillRect(food.x*grid+2, food.y*grid+2, grid-4, grid-4);
-        if (bonusFood) {
-            const bonusAppleColor = getGoldAppleRenderColor(1);
-            ctx.fillStyle = bonusAppleColor;
-            if (data.neonEnabled) ctx.shadowColor = bonusAppleColor;
-            ctx.fillRect(bonusFood.x*grid+2, bonusFood.y*grid+2, grid-4, grid-4);
-        }
-        ctx.shadowBlur = 0;
-        ctx.shadowColor = 'transparent';
-        if (soulHusk && soulHusk.segments) {
-            soulHusk.segments.forEach((seg, idx) => {
-                const pad = idx === 0 ? 3 : 4;
-                ctx.fillStyle = idx === 0 ? 'rgba(210, 120, 255, 0.95)' : 'rgba(165, 85, 240, 0.9)';
-                ctx.fillRect(seg.x * grid + pad, seg.y * grid + pad, grid - pad * 2, grid - pad * 2);
-                ctx.strokeStyle = 'rgba(245, 191, 255, 0.8)';
-                ctx.lineWidth = 1;
-                ctx.strokeRect(seg.x * grid + pad, seg.y * grid + pad, grid - pad * 2, grid - pad * 2);
-            });
-        }
-        if (data.cannibalism && shedTailPieces.length > 0) {
-            shedTailPieces.forEach(seg => {
-                ctx.fillStyle = 'rgba(170, 95, 230, 0.9)';
-                ctx.fillRect(seg.x * grid + 5, seg.y * grid + 5, grid - 10, grid - 10);
-                ctx.strokeStyle = 'rgba(240, 200, 255, 0.9)';
-                ctx.lineWidth = 1;
-                ctx.strokeRect(seg.x * grid + 5, seg.y * grid + 5, grid - 10, grid - 10);
-            });
-        }
-        if (isPhasing && data.phasePremonition && nextAppleLocation && Date.now() < phasePreviewUntil) {
-            ctx.strokeStyle = 'rgba(160,32,240,0.95)';
-            ctx.lineWidth = 3;
-            ctx.strokeRect(nextAppleLocation.x*grid+3, nextAppleLocation.y*grid+3, grid-6, grid-6);
-            ctx.fillStyle = 'rgba(160,32,240,0.22)';
-            ctx.fillRect(nextAppleLocation.x*grid+4, nextAppleLocation.y*grid+4, grid-8, grid-8);
-        }
-        
-        // Visuals
-        if (data.neonEnabled && (data.owned.indexOf(data.skin) >= 3 || isPhasing || cheatActive)) { particles.push({x: snake[0].x*grid+10, y: snake[0].y*grid+10, life: 1, c: isPhasing ? "white" : getActiveSnakeColor()}); }
-        particles = data.neonEnabled
-            ? particles.filter(p => { p.life -= 0.1; ctx.globalAlpha = p.life; ctx.fillStyle = p.c; ctx.beginPath(); ctx.arc(p.x, p.y, 5, 0, Math.PI*2); ctx.fill(); return p.life > 0; })
-            : [];
-        ctx.globalAlpha = 1;
-        snake.forEach((s, i) => {
-            if (isPhasing) ctx.globalAlpha = 0.5;
-            if (data.skin === IMAGE_SKIN_ID && !isPhasing && !cheatActive) {
-                const isTail = i === snake.length - 1;
-                if (i === 0) {
-                    drawPatternedSnakeSegment(s, true);
-                } else if (isTail) {
-                    if (!drawTailSegmentImage(s)) drawPatternedSnakeSegment(s, false);
-                } else {
-                    if (!drawBodySegmentImage(s)) drawPatternedSnakeSegment(s, false);
-                }
-            } else {
-                drawPatternedSnakeSegment(s, i === 0);
-            }
-            ctx.globalAlpha = 1;
-        });
-        
+        snakeTrail.push({ x: snake[0].x, y: snake[0].y });
+        if (snakeTrail.length > 2400) snakeTrail.shift();
+
+        renderGameFrame();
+
         setTimeout(gameLoop, getLoopDelay());
     }
 
@@ -2887,6 +2955,11 @@ function init() {
     endingTriggered = false;
     endingAwaitingClick = false;
     queuedEndingText = "Thanks for playing Snake 2.";
+    if (hellRetraceTimer) {
+        clearInterval(hellRetraceTimer);
+        hellRetraceTimer = null;
+    }
+    snakeTrail = [];
     const endingOverlay = document.getElementById('ending-overlay');
     if (endingOverlay) endingOverlay.style.display = 'none';
     creditsMusic.pause();
@@ -2921,6 +2994,7 @@ if (data.diedLastRun) {
 
     const effectiveSize = data.startSz + tSz;
     snake = createSpawnSnake(effectiveSize);
+    snakeTrail = snake.length > 0 ? [{ x: snake[0].x, y: snake[0].y }] : [];
 
     dx = 1;
     dy = 0;
