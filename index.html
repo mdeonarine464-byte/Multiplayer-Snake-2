@@ -681,10 +681,11 @@
     const creditsMusic = new Audio("credit.mp3");
     creditsMusic.loop = false;
     creditsMusic.volume = 0.75;
+    const ENDING_DEFAULT_TEXT = "Thanks for playing Snake 2.";
     let endingTriggered = false;
     let endingActive = false;
     let endingAwaitingClick = false;
-    let queuedEndingText = "Thanks for playing Snake 2.";
+    let queuedEndingText = ENDING_DEFAULT_TEXT;
     const IMAGE_SKIN_ID = 'triple-image';
     const snakeImageSkinAssets = {
         head: new Image(),
@@ -696,23 +697,62 @@
     snakeImageSkinAssets.body.src = 'https://codehs.com/uploads/39c867b57d8cf23c0094d7fb3de37db7';
     snakeImageSkinAssets.tail.src = 'https://codehs.com/uploads/7db8b7ebaf3e37439adf04a3145b0de1';
 
+    function normalizeEndingText(endingText) {
+        return (typeof endingText === "string" && endingText.trim())
+            ? endingText.trim()
+            : ENDING_DEFAULT_TEXT;
+    }
+
+    function safePlayAudio(audio) {
+        if (!audio || !data.musicEnabled) return;
+        audio.play().catch(() => {});
+    }
+
+    function stopCreditsMusic() {
+        creditsMusic.pause();
+        creditsMusic.currentTime = 0;
+    }
+
     function playDefaultMusic() {
-        if (!data.musicEnabled) return;
-        if (endingTriggered) return;
-        if (!endingMusic.paused) endingMusic.pause();
-        defaultMusic.play().catch(() => {});
+        if (!data.musicEnabled || endingTriggered || titleActive) return;
+        endingMusic.pause();
+        stopCreditsMusic();
+        safePlayAudio(defaultMusic);
     }
 
     function playEndingMusic() {
         if (!data.musicEnabled) return;
-        if (endingTriggered) return;
         endingTriggered = true;
         defaultMusic.pause();
+        stopCreditsMusic();
         endingMusic.currentTime = 0;
-        endingMusic.play().catch(() => {});
+        safePlayAudio(endingMusic);
+    }
+
+    function resetCreditsRoll() {
+        const roll = document.getElementById("credits-roll");
+        if (!roll) return;
+        roll.classList.remove("scrolling");
+        void roll.offsetWidth;
+        roll.classList.add("scrolling");
+    }
+
+    function showEndingOverlay(endingText) {
+        const endingOverlay = document.getElementById("ending-overlay");
+        const endingOverlayText = document.getElementById("ending-overlay-text");
+        if (!endingOverlay || !endingOverlayText) return;
+        endingOverlayText.textContent = normalizeEndingText(endingText);
+        endingOverlay.style.display = "flex";
+    }
+
+    function hideEndingOverlay() {
+        const endingOverlay = document.getElementById("ending-overlay");
+        if (endingOverlay) endingOverlay.style.display = "none";
     }
 
     function beginEndingSequence(endingText) {
+        if (endingActive) return;
+        endingActive = true;
         clearTimeout(phaseTimeout);
         clearTimeout(phaseCooldownTimer);
         isPaused = true;
@@ -722,23 +762,17 @@
     }
 
     function queueEndingCredits(endingText) {
-        queuedEndingText = endingText;
+        queuedEndingText = normalizeEndingText(endingText);
         endingAwaitingClick = true;
-        const endingOverlay = document.getElementById('ending-overlay');
-        const endingOverlayText = document.getElementById('ending-overlay-text');
-        if (endingOverlay && endingOverlayText) {
-            endingOverlayText.textContent = endingText;
-            endingOverlay.style.display = 'flex';
-        }
+        showEndingOverlay(queuedEndingText);
     }
 
     function handleEndingAdvanceClick() {
-    if (!endingAwaitingClick) return;
-    endingAwaitingClick = false;
-    const endingOverlay = document.getElementById('ending-overlay');
-    if (endingOverlay) endingOverlay.style.display = 'none';
-    startCredits(queuedEndingText);
-}
+        if (!endingAwaitingClick) return;
+        endingAwaitingClick = false;
+        hideEndingOverlay();
+        openCredits(queuedEndingText);
+    }
 
 
     const defaultSaveData = {
@@ -1396,7 +1430,6 @@ soulButtons.forEach(btn => {
 
 function handleBoardFull() {
 if (endingActive) return;
-endingActive = true;
 
 if (data.cheatActive === true) {
     beginEndingSequence("CHEATER CHEATER PUMKIN EATER!");
@@ -1987,27 +2020,24 @@ function isSkinRequirementMet(requirement) {
     if (requirement === 'averageEnding') return data.endingAverageUnlocked === true;
     return true;
 }
-function openCredits(endingText = "Thanks for playing Snake 2.") {
+function openCredits(endingText = ENDING_DEFAULT_TEXT) {
+    const safeEndingText = normalizeEndingText(endingText);
     const textEl = document.getElementById("credits-ending-text");
-    if (textEl) textEl.innerText = endingText;
+    if (textEl) textEl.innerText = safeEndingText;
 
     const modal = document.getElementById("credits-modal");
     if (modal) modal.style.display = "flex";
 
+    endingAwaitingClick = false;
+    hideEndingOverlay();
     isPaused = true;
     modalActive = true;
-
-    const roll = document.getElementById("credits-roll");
-    if (roll) {
-        roll.classList.remove("scrolling");
-        void roll.offsetWidth;
-        roll.classList.add("scrolling");
-    }
+    resetCreditsRoll();
 
     defaultMusic.pause();
     endingMusic.pause();
     creditsMusic.currentTime = 0;
-    if (data.musicEnabled) creditsMusic.play().catch(() => {});
+    safePlayAudio(creditsMusic);
 }
 
 function closeCredits() {
@@ -2025,13 +2055,12 @@ function closeCredits() {
         isPaused = false;
     }
 
-    creditsMusic.pause();
-    creditsMusic.currentTime = 0;
+    stopCreditsMusic();
     if (!titleActive && data.musicEnabled) playDefaultMusic();
 }
 
 function startCredits(endingText) {
-    openCredits(endingText);
+    openCredits(normalizeEndingText(endingText));
 }
     function buyBuff(type) {
   if (type === 'speed' && data.gems >= 500) {
@@ -2881,11 +2910,11 @@ function init() {
     endingActive = false;
     endingTriggered = false;
     endingAwaitingClick = false;
-    queuedEndingText = "Thanks for playing Snake 2.";
-    const endingOverlay = document.getElementById('ending-overlay');
-    if (endingOverlay) endingOverlay.style.display = 'none';
-    creditsMusic.pause();
-    creditsMusic.currentTime = 0;
+    queuedEndingText = ENDING_DEFAULT_TEXT;
+    hideEndingOverlay();
+    const creditsModal = document.getElementById("credits-modal");
+    if (creditsModal) creditsModal.style.display = "none";
+    stopCreditsMusic();
     
     runXPBoostBought = 0;
     runXPBoostApple = 0;
