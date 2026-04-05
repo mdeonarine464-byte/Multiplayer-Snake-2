@@ -759,19 +759,15 @@
                 return;
             }
 
-            const nextHead = hellRetraceStage === 'route'
-                ? hellRetracePath.shift()
-                : { x: snake[1].x, y: snake[1].y };
-            snake.unshift({ x: nextHead.x, y: nextHead.y });
-
-            for (let i = snake.length - 1; i >= 1; i--) {
-                if (snake[i].x === nextHead.x && snake[i].y === nextHead.y) {
-                    snake.splice(i, 1);
-                }
-            }
-
-            if (snake.length > 1) {
-                snake.pop();
+            if (hellRetraceStage === 'route') {
+                const nextHead = hellRetracePath.shift();
+                snake.unshift({ x: nextHead.x, y: nextHead.y });
+                if (snake.length > 1) snake.pop();
+            } else {
+                const biteTarget = { x: snake[1].x, y: snake[1].y };
+                snake.unshift(biteTarget);
+                snake.splice(2, 1);
+                if (snake.length > 1) snake.pop();
             }
             renderCurrentFrame();
             hellRetraceTimer = setTimeout(retraceStep, 45);
