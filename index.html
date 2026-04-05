@@ -3,16 +3,18 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Unchained Multiplayer Snake</title>
+  <title>Snake 2: Multiplayer Arena</title>
   <style>
     :root {
       --bg: #05070b;
       --panel: #111722;
       --text: #ecf1ff;
       --subtle: #9aa8c4;
-      --accent: #50d4ff;
+      --accent: #00fbff;
       --danger: #ff5a7a;
       --good: #55e6a5;
+      --gold: #ffd700;
+      --purple: #a020f0;
     }
 
     * { box-sizing: border-box; }
@@ -20,10 +22,24 @@
     body {
       margin: 0;
       font-family: Inter, Segoe UI, Roboto, sans-serif;
-      background: radial-gradient(circle at top, #0d1420, var(--bg));
+      background: radial-gradient(circle at top, #0f1522, var(--bg));
       color: var(--text);
       min-height: 100vh;
       overflow: hidden;
+    }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      background: repeating-linear-gradient(
+        to bottom,
+        rgba(255, 255, 255, 0.02) 0px,
+        rgba(255, 255, 255, 0.02) 1px,
+        transparent 2px,
+        transparent 4px
+      );
+      pointer-events: none;
+      z-index: 0;
     }
 
     #hud {
@@ -39,8 +55,9 @@
     }
 
     .card {
-      background: rgba(17, 23, 34, 0.86);
-      border: 1px solid rgba(80, 212, 255, 0.28);
+      background: rgba(15, 20, 30, 0.88);
+      border: 1px solid rgba(0, 251, 255, 0.35);
+      border-left: 4px solid var(--accent);
       border-radius: 10px;
       padding: 8px 10px;
       backdrop-filter: blur(3px);
@@ -48,9 +65,27 @@
       pointer-events: auto;
     }
 
-    .card h3 { margin: 0 0 4px; font-size: 14px; color: var(--accent); }
+    .card h3 {
+      margin: 0 0 4px;
+      font-size: 14px;
+      color: var(--accent);
+      text-shadow: 0 0 8px rgba(0, 251, 255, 0.65);
+      letter-spacing: 0.4px;
+    }
     .tiny { font-size: 12px; color: var(--subtle); }
     .small { font-size: 13px; }
+    .snake2-title {
+      color: var(--gold);
+      text-shadow: 0 0 9px rgba(255, 215, 0, 0.8);
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+    .snake2-subtitle {
+      color: #a6f6ff;
+      text-shadow: 0 0 8px rgba(0, 251, 255, 0.4);
+      font-size: 12px;
+      margin-bottom: 4px;
+    }
 
     #center-banner {
       position: fixed;
@@ -82,7 +117,8 @@
       max-height: 88vh;
       overflow: auto;
       background: #0e1522;
-      border: 1px solid rgba(80, 212, 255, 0.45);
+      border: 1px solid rgba(0, 251, 255, 0.45);
+      box-shadow: 0 0 18px rgba(0, 251, 255, 0.2);
       border-radius: 14px;
       padding: 16px;
     }
@@ -133,7 +169,9 @@
       font-size: 12px;
       margin-right: 6px;
       background: #1d2a42;
-      border: 1px solid rgba(255, 255, 255, 0.15);
+      border: 1px solid rgba(0, 251, 255, 0.25);
+      color: #b7f7ff;
+      text-shadow: 0 0 6px rgba(0, 251, 255, 0.55);
     }
   </style>
 </head>
@@ -142,7 +180,9 @@
 
   <div id="hud">
     <div class="card">
-      <h3>Unchained Snake</h3>
+      <div class="snake2-title">Snake 2</div>
+      <div class="snake2-subtitle">Multiplayer Arena</div>
+      <h3>Unchained Mode</h3>
       <div class="small">Walls retreat: snakes wrap around the screen (no wall death).</div>
       <div class="tiny">Press <strong>3</strong> to open multiplayer setup. Press <strong>Space</strong> to pause.</div>
     </div>
@@ -448,7 +488,6 @@ Self-collision → death</div>
           flash(`${snake.name} core upgrade -> Lv.${snake.rpgLevel}`, '#b692ff');
         }
       }
-    }
 
     function killSnake(victim, killer = null) {
       if (!victim.alive) return;
@@ -579,11 +618,11 @@ Self-collision → death</div>
     }
 
     function render() {
-      ctx.fillStyle = '#03060a';
+      ctx.fillStyle = '#02050a';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
       // grid hint
-      ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+      ctx.strokeStyle = 'rgba(0,251,255,0.06)';
       for (let x = 0; x < state.cellCols; x++) {
         ctx.beginPath();
         ctx.moveTo(x * GRID, 0);
@@ -598,10 +637,12 @@ Self-collision → death</div>
       }
 
       for (const a of state.apples) {
-        ctx.fillStyle = '#ff6363';
+        ctx.fillStyle = '#ff5050';
         ctx.beginPath();
         ctx.arc(a.x * GRID + GRID / 2, a.y * GRID + GRID / 2, GRID / 2.5, 0, Math.PI * 2);
         ctx.fill();
+        ctx.strokeStyle = 'rgba(255, 80, 80, 0.7)';
+        ctx.stroke();
       }
 
       for (const s of state.snakes) {
@@ -609,7 +650,10 @@ Self-collision → death</div>
           drawPatternCell(part.x, part.y, s.color, s.pattern);
           if (idx === 0) {
             ctx.strokeStyle = '#fff';
+            ctx.shadowColor = 'rgba(255, 255, 255, 0.85)';
+            ctx.shadowBlur = 8;
             ctx.strokeRect(part.x * GRID + 1, part.y * GRID + 1, GRID - 2, GRID - 2);
+            ctx.shadowBlur = 0;
           }
         });
       }
