@@ -722,6 +722,54 @@
         queueEndingCredits(endingText);
     }
 
+    function drawCheaterEndingFrame() {
+        drawPlayfieldBackground();
+        const primaryAppleColor = getGoldAppleRenderColor(0);
+        ctx.fillStyle = primaryAppleColor;
+        if (data.neonEnabled) {
+            ctx.shadowColor = primaryAppleColor;
+            ctx.shadowBlur = 10;
+        } else {
+            ctx.shadowColor = 'transparent';
+            ctx.shadowBlur = 0;
+        }
+        if (food) ctx.fillRect(food.x * grid + 2, food.y * grid + 2, grid - 4, grid - 4);
+        if (bonusFood) {
+            const bonusAppleColor = getGoldAppleRenderColor(1);
+            ctx.fillStyle = bonusAppleColor;
+            if (data.neonEnabled) ctx.shadowColor = bonusAppleColor;
+            ctx.fillRect(bonusFood.x * grid + 2, bonusFood.y * grid + 2, grid - 4, grid - 4);
+        }
+        ctx.shadowBlur = 0;
+        ctx.shadowColor = 'transparent';
+        snake.forEach((s, i) => {
+            drawPatternedSnakeSegment(s, i === 0);
+        });
+    }
+
+    function runCheaterSelfEatSequence() {
+        clearTimeout(phaseTimeout);
+        clearTimeout(phaseCooldownTimer);
+        isPaused = true;
+        modalActive = true;
+        playEndingMusic();
+
+        const bite = () => {
+            if (snake.length <= 1) {
+                beginEndingSequence("CHEATER CHEATER PUMKIN EATER!");
+                return;
+            }
+
+            const nextSegment = snake[1];
+            snake = [{ x: nextSegment.x, y: nextSegment.y }, ...snake.slice(2)];
+            drawCheaterEndingFrame();
+            setTimeout(bite, 70);
+        };
+
+        drawCheaterEndingFrame();
+        setTimeout(bite, 180);
+    }
+
     function queueEndingCredits(endingText) {
         queuedEndingText = endingText;
         endingAwaitingClick = true;
@@ -1406,7 +1454,7 @@ if (endingActive) return;
 endingActive = true;
 
 if (data.cheatActive === true) {
-    beginEndingSequence("CHEATER CHEATER PUMKIN EATER!");
+    runCheaterSelfEatSequence();
 } else if (data.cardLinked === true){
     data.endingHellUnlocked = true;
     save();
