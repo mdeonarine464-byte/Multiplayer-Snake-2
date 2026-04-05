@@ -318,7 +318,7 @@
 }
 
 @keyframes creditsRoll {
-    0% { transform: translateY(100%); }
+    0% { transform: translateY(0); }
     100% { transform: translateY(-100%); }
 }
 
@@ -2095,11 +2095,9 @@ function openCredits(endingText = "Thanks for playing Snake 2.") {
     const roll = document.getElementById("credits-roll");
     if (roll) {
         roll.classList.remove("scrolling");
-        roll.style.transform = "translateY(100%)";
         requestAnimationFrame(() => {
             requestAnimationFrame(() => {
                 roll.classList.add("scrolling");
-                roll.style.transform = "";
             });
         });
     }
