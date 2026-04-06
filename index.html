@@ -722,6 +722,123 @@
         queueEndingCredits(endingText);
     }
 
+    function drawHellCinematicSnakeSegments(segments, color = '#ffffff') {
+        ctx.fillStyle = color;
+        segments.forEach((seg, idx) => {
+            const size = idx === 0 ? grid - 2 : grid - 4;
+            const inset = idx === 0 ? 1 : 2;
+            ctx.fillRect(seg.x + inset, seg.y + inset, size, size);
+        });
+    }
+
+    function runHellEndingSequence() {
+        clearTimeout(phaseTimeout);
+        clearTimeout(phaseCooldownTimer);
+        isPaused = true;
+        modalActive = true;
+        playEndingMusic();
+
+        const cinematic = {
+            phase: 1,
+            wallFrames: 10,
+            appleX: canvas.width - grid,
+            appleY: canvas.height / 2 - grid / 2,
+            blackCutFrames: 0,
+            phaseTwoSnake: [],
+            phaseTwoApple: { x: canvas.width - 80, y: canvas.height / 2 - grid / 2 },
+            phaseTwoDone: false
+        };
+
+        const sourceLength = Math.max(5, snake.length);
+        const phaseOneSnake = Array.from({ length: sourceLength }, (_, i) => ({
+            x: canvas.width / 2 - i * (grid - 2),
+            y: canvas.height / 2 - grid / 2
+        }));
+        const phaseOneSpeed = 4.6;
+        const phaseOneSegmentGap = grid - 2;
+
+        const step = () => {
+            if (!endingActive) return;
+
+            drawPlayfieldBackground();
+
+            if (cinematic.phase === 1) {
+                const wallAlpha = Math.max(0, cinematic.wallFrames / 10);
+                if (wallAlpha > 0) {
+                    ctx.fillStyle = `rgba(255,255,255,${wallAlpha})`;
+                    ctx.fillRect(canvas.width - 6, 0, 6, canvas.height);
+                }
+
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(cinematic.appleX + 2, cinematic.appleY + 2, grid - 4, grid - 4);
+
+                const targetHeadX = cinematic.appleX - 26;
+                phaseOneSnake[0].x += (targetHeadX - phaseOneSnake[0].x) * 0.35;
+
+                for (let i = 1; i < phaseOneSnake.length; i++) {
+                    const lead = phaseOneSnake[i - 1];
+                    const curr = phaseOneSnake[i];
+                    const desired = lead.x - phaseOneSegmentGap;
+                    curr.x += (desired - curr.x) * 0.35;
+                }
+
+                cinematic.appleX += phaseOneSpeed;
+                cinematic.wallFrames -= 1;
+
+                drawHellCinematicSnakeSegments(phaseOneSnake);
+
+                const offscreenCount = phaseOneSnake.filter(seg => seg.x > canvas.width).length;
+                if (offscreenCount >= 5) {
+                    cinematic.phase = 2;
+                    cinematic.phaseTwoSnake = Array.from({ length: 5 }, (_, i) => ({
+                        x: -140 - i * (grid - 2),
+                        y: canvas.height / 2 - grid / 2
+                    }));
+                    cinematic.phaseTwoApple = { x: canvas.width - 70, y: canvas.height / 2 - grid / 2 };
+                }
+            } else if (cinematic.phase === 2) {
+                ctx.fillStyle = '#000000';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                const p2Snake = cinematic.phaseTwoSnake;
+                if (!cinematic.phaseTwoDone) {
+                    cinematic.phaseTwoApple.x += 0.8;
+                    if (cinematic.phaseTwoApple.x > canvas.width - 48) cinematic.phaseTwoApple.x = canvas.width - 48;
+
+                    const p2Head = p2Snake[0];
+                    p2Head.x += 5.2;
+                    for (let i = 1; i < p2Snake.length; i++) {
+                        const lead = p2Snake[i - 1];
+                        p2Snake[i].x += (lead.x - (grid - 2) - p2Snake[i].x) * 0.55;
+                    }
+
+                    const headCenter = p2Head.x + grid / 2;
+                    const appleCenter = cinematic.phaseTwoApple.x + grid / 2;
+                    if (headCenter >= appleCenter - 4) {
+                        cinematic.phaseTwoDone = true;
+                        cinematic.blackCutFrames = 12;
+                    }
+                } else {
+                    cinematic.blackCutFrames -= 1;
+                    if (cinematic.blackCutFrames <= 0) {
+                        startCredits("HELL ENDING HERE!");
+                        return;
+                    }
+                }
+
+                if (!cinematic.phaseTwoDone) {
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fillRect(cinematic.phaseTwoApple.x + 2, cinematic.phaseTwoApple.y + 2, grid - 4, grid - 4);
+                }
+                drawHellCinematicSnakeSegments(p2Snake);
+            }
+
+            setTimeout(step, 35);
+        };
+
+        step();
+    }
+
     function drawCheaterEndingFrame() {
         drawPlayfieldBackground();
         const primaryAppleColor = getGoldAppleRenderColor(0);
@@ -1458,7 +1575,7 @@ if (data.cheatActive === true) {
 } else if (data.cardLinked === true){
     data.endingHellUnlocked = true;
     save();
-    beginEndingSequence("HELL ENDING HERE!");
+    runHellEndingSequence();
 } else {
     data.endingAverageUnlocked = true;
     save();
