@@ -95,18 +95,17 @@ body{background:var(--dark);color:#fff;font-family:'Segoe UI',sans-serif;min-hei
 #rpg-core-panel.visible{display:block;}
 #rpg-core-panel .panel{border-left:3px solid var(--xp);}
 #rpg-core-panel h3{color:var(--xp);}
-.core-player-row{display:flex;align-items:flex-start;gap:14px;padding:10px 0;border-bottom:1px solid #1a1a1a;}
+.core-player-row{display:flex;flex-direction:column;gap:6px;padding:12px 0;border-bottom:1px solid #1a1a1a;}
 .core-player-row:last-child{border-bottom:none;}
-.core-player-name{font-size:.75em;font-weight:bold;min-width:80px;padding-top:6px;}
-.core-options{display:flex;gap:8px;flex-wrap:wrap;}
-.core-btn{background:#0a0a0a;border:2px solid #222;border-radius:8px;padding:8px 12px;cursor:pointer;font-size:.72em;transition:all .15s;text-align:left;min-width:130px;}
-.core-btn:hover{border-color:#555;}
-.core-btn.selected-phase{border-color:var(--soul);background:#0d001a;color:var(--soul);}
-.core-btn.selected-shedding{border-color:#c8a0ff;background:#120022;color:#c8a0ff;}
-.core-btn-name{display:block;font-weight:bold;margin-bottom:3px;}
-.core-btn-chain{display:block;font-size:.85em;color:#555;line-height:1.4;}
-.core-btn.selected-phase .core-btn-chain{color:#6633aa;}
-.core-btn.selected-shedding .core-btn-chain{color:#8860cc;}
+.core-player-name{font-size:.75em;font-weight:bold;letter-spacing:1px;}
+.core-selector{display:flex;align-items:stretch;gap:8px;}
+.core-arrow{background:#111;border:1px solid #333;color:#666;border-radius:6px;padding:0 12px;font-size:1em;cursor:pointer;transition:all .15s;flex-shrink:0;}
+.core-arrow:hover{border-color:#888;color:#fff;}
+.core-display{flex:1;border:2px solid #333;border-radius:8px;padding:10px 14px;background:#050505;transition:border-color .2s;}
+.core-display-name{font-size:.82em;font-weight:bold;margin-bottom:4px;}
+.core-display-key{font-size:.7em;background:#1a1a1a;border:1px solid #333;border-radius:3px;padding:1px 5px;margin-left:6px;color:#888;font-weight:normal;vertical-align:middle;}
+.core-display-chain{font-size:.68em;color:#555;line-height:1.8;display:flex;flex-direction:column;gap:2px;margin-top:4px;}
+.cti{display:block;}.ctd{color:#3a3a3a;}
  
 /* GAME SCREEN */
 #game-screen{flex-direction:column;width:100vw;height:100vh;overflow:hidden;}
@@ -118,6 +117,8 @@ body{background:var(--dark);color:#fff;font-family:'Segoe UI',sans-serif;min-hei
 .hud-core-bar{height:3px;border-radius:2px;margin-top:4px;background:#1a1a1a;overflow:hidden;}
 .hud-core-fill{height:100%;border-radius:2px;transition:width .3s;}
 .hud-core-label{font-size:.5em;color:#444;margin-top:2px;}
+.hud-buffs{font-size:.48em;color:#444;margin-top:1px;display:flex;flex-wrap:wrap;gap:3px;justify-content:center;}
+.hud-buff-tag{padding:1px 4px;border-radius:3px;border:1px solid;font-size:.9em;}
 #canvas-wrap{position:relative;flex:1;overflow:hidden;}
 #game-canvas{display:block;background:#000;image-rendering:pixelated;width:100%;height:100%;}
 #game-overlay{position:absolute;inset:0;background:rgba(0,0,0,.88);display:none;align-items:center;justify-content:center;flex-direction:column;gap:12px;z-index:20;}
@@ -201,10 +202,21 @@ body{background:var(--dark);color:#fff;font-family:'Segoe UI',sans-serif;min-hei
     <div class="panel">
       <h3>⚙ RPG — Choose Your Core</h3>
       <p style="font-size:.72em;color:#666;margin-bottom:10px;line-height:1.5;">
-        Each snake evolves their core over time. Eating apples and killing enemies speeds up progression.
-        Abilities unlock sequentially — early tiers unlock faster than later ones.
+        Each snake evolves their core over time — eating apples, killing enemies, or triggering the ability all grant XP.
+        Early tiers unlock faster than later ones. Use your action key in-game to activate the ability.
       </p>
       <div id="core-player-rows"></div>
+    </div>
+  </div>
+ 
+  <!-- Side Buff Selection — always visible -->
+  <div id="side-buff-panel" class="visible">
+    <div class="panel">
+      <h3>★ Side Buffs — Pick 2 per player</h3>
+      <p style="font-size:.72em;color:#666;margin-bottom:10px;line-height:1.5;">
+        Each player chooses 2 passive buffs. Buffs stack with cores and apply for the whole match.
+      </p>
+      <div id="buff-player-rows"></div>
     </div>
   </div>
  
@@ -258,10 +270,30 @@ const SWATCH_COLORS=[
 ];
  
 // ════════════════════════════════════════════════════════
+// ACTION KEYS — one per player slot, for core abilities
+// P1=Q  P2=Y  P3=Ctrl
+// ════════════════════════════════════════════════════════
+const ACTION_KEYS = ['q', 'y', 'Control'];
+const ACTION_KEY_LABELS = ['Q', 'Y', 'Ctrl'];
+ 
+// ════════════════════════════════════════════════════════
+// PHASE TIMINGS
+// Base: 5 000 ms active, 7 500 ms cooldown
+// Dual Phase tier doubles both (10 000 ms active, 15 000 ms CD)
+// ════════════════════════════════════════════════════════
+const PHASE_DURATION_BASE = 5000;
+const PHASE_CD_BASE       = 7500;
+ 
+// ════════════════════════════════════════════════════════
 // CORE DEFINITIONS
 // Each core has 4 tiers (index 0 = base, 1-3 = upgrades).
 // xpThresholds[i] = XP needed to unlock tier i+1 from tier i.
-// Intentionally non-linear: first unlock is cheapest, last is most expensive.
+// Intentionally non-linear AND slowed: base ~80 XP (+71 passive≈10s),
+// then each subsequent tier adds another ~71 XP worth of passive time.
+//   Tier 0→1: 160  (≈10 s slower than the original 80)
+//   Tier 1→2: 300  (≈10 s slower than 160 at the same rate)
+//   Tier 2→3: 520  (≈10 s slower than 300)
+// 1 passive XP/tick, tick=140ms → 71 ticks≈10s = +71 XP per "10 seconds"
 // ════════════════════════════════════════════════════════
 const CORE_DEFS = {
   phase: {
@@ -269,36 +301,106 @@ const CORE_DEFS = {
     label: 'Phase Core',
     color: '#a020f0',
     tiers: [
-      { name:'Phase Shift',   desc:'Press Space/Shift/Tab to phase through walls & snakes for 1.5s.' },
-      { name:'Phase Charge',  desc:'Eating apples while phasing reduces cooldown by 0.5s each.' },
-      { name:'Phase Expertise',desc:'While phasing, score ×1.75 and grow ×1.75 per apple.' },
-      { name:'Dual Phase',    desc:'2 phase charges before cooldown begins.' },
+      { name:'Phase Shift',
+        desc:'5s of phasing through walls & snakes. 7.5s cooldown. Action key to activate.' },
+      { name:'Phase Charge',
+        desc:'Eating apples while cooldown is ticking reduces CD by 0.5s each.' },
+      { name:'Phase Expertise',
+        desc:'Apples eaten while actively phasing give double XP toward the next tier.' },
+      { name:'Dual Phase',
+        desc:'2 charges before cooldown. Phase duration and cooldown both doubled (10s / 15s).' },
     ],
-    // XP to unlock next tier: 80 → 160 → 320 (doubles each time = progressively harder)
-    xpThresholds: [80, 160, 320],
-    // XP gained per event
+    // Thresholds slowed by ~71 XP (10 s of passive ticks) each step
+    xpThresholds: [160, 300, 520],
     xpPerApple:   4,
     xpPerKill:    40,
-    // Bonus: while phasing, apples give +8 XP instead of +4
-    xpPerApplePhasing: 8,
+    // Phase Expertise bonus: +4 extra XP per apple while phasing (double rate)
+    xpPerApplePhasing: 4,   // added ON TOP of xpPerApple → total 8
   },
   shedding: {
     id:    'shedding',
     label: 'Shedding Core',
     color: '#c8a0ff',
     tiers: [
-      { name:'Shedding',       desc:'Every 10 apples, shed 3 tail segments.' },
-      { name:'Cannibalism',    desc:'Eat shed pieces for bonus score. Eating shed pieces gives +16 XP (more than apples).' },
-      { name:'Ark Shedding',   desc:'When shedding, a slow zone appears at the shed location for 3s — enemies inside move at 60% speed.' },
-      { name:'Shedding Bricks',desc:'Shed pieces become solid walls for enemies that last 15 seconds.' },
+      { name:'Shedding',
+        desc:'Every 10 apples, shed 3 tail segments. Action key to shed immediately.' },
+      { name:'Cannibalism',
+        desc:'Eat shed pieces for 2× score bonus. Eating shed gives +16 XP (vs +4 for an apple).' },
+      { name:'Ark Shedding',
+        desc:'When shedding occurs, a slow zone lingers at the shed spot for 3s (enemies at 60% speed).' },
+      { name:'Shedding Bricks',
+        desc:'Shed pieces become solid walls for enemies lasting 15 seconds.' },
     ],
-    xpThresholds: [80, 160, 320],
+    xpThresholds: [160, 300, 520],
     xpPerApple:   4,
     xpPerKill:    40,
-    // Bonus: eating own shed pieces gives extra XP (Cannibalism tier)
     xpPerShedEat: 16,
   },
 };
+ 
+// ════════════════════════════════════════════════════════
+// SIDE BUFF DEFINITIONS — 8 buffs, pick 2 per player
+// Applied passively each game for the whole match.
+// ════════════════════════════════════════════════════════
+const BUFF_DEFS = [
+  {
+    id:'length_speed',
+    name:'Slipstream',
+    color:'#ff4500',
+    desc:'More length = more speed. Each body segment beyond 5 reduces tick delay by 1ms (capped at −40ms).',
+  },
+  {
+    id:'quick_turn',
+    name:'Quick Turn',
+    color:'#adff2f',
+    desc:'Double-tap the opposite direction (within 200ms) to reverse instantly — no self-collision on the turn.',
+  },
+  {
+    id:'length_buff',
+    name:'Growth Bonus',
+    color:'#4ecca3',
+    desc:'Every 10 body segments grants a random side buff effect for 8 seconds.',
+  },
+  {
+    id:'molt',
+    name:'Molt',
+    color:'#c8a0ff',
+    desc:'Every 15 apples, shed 2 tail segments passively (separate from Shedding Core).',
+  },
+  {
+    id:'gold_apple',
+    name:'Gold Apple',
+    color:'#ffd700',
+    desc:'Apples give 15% more XP toward core upgrades.',
+  },
+  {
+    id:'dual_apple',
+    name:'Dual Apple',
+    color:'#ff8c00',
+    desc:'22% chance a second apple spawns each time one is eaten.',
+  },
+  {
+    id:'echo_growth',
+    name:'Echo Growth',
+    color:'#00fbff',
+    desc:'Every 5th apple eaten grants +2 free body growth.',
+  },
+  {
+    id:'xp_boost',
+    name:'XP Surge',
+    color:'#9370db',
+    desc:'All XP gains (apples + kills) are increased by 25%.',
+  },
+];
+ 
+// Random length-milestone buff effects (Growth Bonus buff)
+const LENGTH_BUFF_EFFECTS = [
+  (p)=>{ p.ghost=true; setTimeout(()=>{if(p)p.ghost=false;},3000); },          // ghost
+  (p)=>{ p._noWallUntil=Math.max(p._noWallUntil||0,Date.now()+5000); },         // no wall
+  (p)=>{ p.growCount+=4; },                                                      // grow burst
+  (p)=>{ p.speed=Math.max(80,p.speed-20); setTimeout(()=>p.speed=BASE_SPEED,4000); }, // speed burst
+  (p)=>{ p._goldApples=(p._goldApples||0)+3; },                                  // gold apples
+];
  
 // Carnival abilities (same as before, apples look normal)
 const CARNIVAL_ABILITIES=[
@@ -317,9 +419,9 @@ const CARNIVAL_ABILITIES=[
 // ════════════════════════════════════════════════════════
 let lobbyState={
   players:[
-    {active:true, name:'Player 1',color:'#00fbff',controls:'arrows',keys:{...PLAYER_DEFAULTS[0].keys},coreId:'phase'},
-    {active:false,name:'Player 2',color:'#ff00ff',controls:'wasd',  keys:{...PLAYER_DEFAULTS[1].keys},coreId:'shedding'},
-    {active:false,name:'Player 3',color:'#ffd700',controls:'uhjk',  keys:{...PLAYER_DEFAULTS[2].keys},coreId:'phase'},
+    {active:true, name:'Player 1',color:'#00fbff',controls:'arrows',keys:{...PLAYER_DEFAULTS[0].keys},coreId:'phase',   buffIds:['echo_growth','gold_apple']},
+    {active:false,name:'Player 2',color:'#ff00ff',controls:'wasd',  keys:{...PLAYER_DEFAULTS[1].keys},coreId:'shedding',buffIds:['dual_apple','molt']},
+    {active:false,name:'Player 3',color:'#ffd700',controls:'uhjk',  keys:{...PLAYER_DEFAULTS[2].keys},coreId:'phase',   buffIds:['length_speed','echo_growth']},
   ],
   mode:'classic',
   winCondition:'longest',
@@ -377,17 +479,49 @@ function startBgAnimation(){if(bgAnimId)cancelAnimationFrame(bgAnimId);initBgSna
 function stopBgAnimation(){if(bgAnimId){cancelAnimationFrame(bgAnimId);bgAnimId=null;}}
  
 // ════════════════════════════════════════════════════════
+// BUFF HELPER
+// ════════════════════════════════════════════════════════
+function hasBuff(p, id){ return p.buffIds && p.buffIds.includes(id); }
+ 
+// ════════════════════════════════════════════════════════
 // INPUT HELPERS (ported from single-player)
+// Quick Turn buff: double-tap opposite direction within 200ms to reverse.
+// When the reversal fires we set _quickTurnGrace so self-collision is skipped that tick.
 // ════════════════════════════════════════════════════════
 function isOppositeDirection(a,b){return a.dx===-b.dx&&a.dy===-b.dy;}
+ 
 function queueDir(p,next){
   if(!next) return;
+ 
+  // Quick Turn buff: detect double-tap of the opposite direction
+  if(hasBuff(p,'quick_turn') && p.body.length>1){
+    const now=Date.now();
+    const cur={dx:p.dx,dy:p.dy};
+    if(isOppositeDirection(next,cur)){
+      // If last press was also this same opposite direction within 200ms → allow reversal
+      if(p._quickTurnLast &&
+         p._quickTurnLast.dx===next.dx && p._quickTurnLast.dy===next.dy &&
+         now-p._quickTurnLast.time < 200){
+        // Force-apply the reversal immediately, bypassing queue
+        p.dx=next.dx; p.dy=next.dy;
+        p.inputQueue=[];       // clear any queued turns
+        p._quickTurnGrace=true; // skip self-collision this step
+        p._quickTurnLast=null;
+        return;
+      }
+      // First tap of opposite — record it but don't queue
+      p._quickTurnLast={dx:next.dx,dy:next.dy,time:now};
+      return;  // don't enqueue yet; wait for second tap
+    }
+  }
+ 
   const tail=p.inputQueue.length>0?p.inputQueue[p.inputQueue.length-1]:{dx:p.dx,dy:p.dy};
   if(isOppositeDirection(next,tail)) return;
   if(next.dx===tail.dx&&next.dy===tail.dy) return;
   if(p.inputQueue.length>=INPUT_QUEUE_MAX) return;
   p.inputQueue.push(next);
 }
+ 
 function applyQueuedDirection(p){
   if(p.inputQueue.length===0) return;
   const next=p.inputQueue.shift();
@@ -422,32 +556,98 @@ function buildLobby(){
   });
   updateControlsHint();
   buildCorePanel();
+  buildBuffPanel();
   startBgAnimation();
+}
+ 
+// Core IDs in cycle order
+const CORE_ORDER = Object.keys(CORE_DEFS);
+ 
+function cycleCoreNext(playerIdx){
+  const p=lobbyState.players[playerIdx];
+  const cur=CORE_ORDER.indexOf(p.coreId);
+  p.coreId=CORE_ORDER[(cur+1)%CORE_ORDER.length];
+  buildLobby();
+}
+function coreCorePrev(playerIdx){
+  const p=lobbyState.players[playerIdx];
+  const cur=CORE_ORDER.indexOf(p.coreId);
+  p.coreId=CORE_ORDER[(cur-1+CORE_ORDER.length)%CORE_ORDER.length];
+  buildLobby();
 }
  
 function buildCorePanel(){
   const container=document.getElementById('core-player-rows');
   if(!container) return;
   container.innerHTML='';
-  lobbyState.players.filter(p=>p.active).forEach((p,_)=>{
-    const idx=lobbyState.players.indexOf(p);
+  lobbyState.players.filter(p=>p.active).forEach((lp)=>{
+    const idx=lobbyState.players.indexOf(lp);
+    const def=CORE_DEFS[lp.coreId];
+    const actionKey=ACTION_KEY_LABELS[idx]||'?';
     const row=document.createElement('div');row.className='core-player-row';
-    const nameEl=document.createElement('div');nameEl.className='core-player-name';nameEl.style.color=p.color;nameEl.textContent=p.name;
-    const optsEl=document.createElement('div');optsEl.className='core-options';
- 
-    Object.values(CORE_DEFS).forEach(def=>{
-      const btn=document.createElement('button');
-      const selCls=def.id==='phase'?'selected-phase':'selected-shedding';
-      btn.className=`core-btn ${p.coreId===def.id?selCls:''}`;
-      btn.innerHTML=`<span class="core-btn-name" style="color:${def.color}">${def.label}</span>`+
-        `<span class="core-btn-chain">${def.tiers.map((t,i)=>`${i===0?'▶':' →'} ${t.name}`).join('')}</span>`;
-      btn.onclick=()=>{lobbyState.players[idx].coreId=def.id;buildLobby();};
-      optsEl.appendChild(btn);
-    });
- 
-    row.appendChild(nameEl);row.appendChild(optsEl);container.appendChild(row);
+    const chain=def.tiers.map((t,i)=>{
+      const arrow=i===0?'▶':'→';
+      return `<span class="cti">${arrow} <em style="color:${def.color}">${t.name}</em><span class="ctd"> — ${t.desc}</span></span>`;
+    }).join('');
+    row.innerHTML=`
+      <div class="core-player-name" style="color:${lp.color}">${lp.name}</div>
+      <div class="core-selector">
+        <button class="core-arrow" onclick="coreCorePrev(${idx})">&#9664;</button>
+        <div class="core-display" style="border-color:${def.color}">
+          <div class="core-display-name" style="color:${def.color}">${def.label} <span class="core-display-key">[${actionKey}]</span></div>
+          <div class="core-display-chain">${chain}</div>
+        </div>
+        <button class="core-arrow" onclick="cycleCoreNext(${idx})">&#9654;</button>
+      </div>`;
+    container.appendChild(row);
   });
 }
+ 
+// ── BUFF PANEL ──────────────────────────────────────────
+const BUFF_IDS = BUFF_DEFS.map(b=>b.id);
+ 
+function cycleBuffNext(playerIdx, slot){
+  const p = lobbyState.players[playerIdx];
+  const other = p.buffIds[slot===0?1:0];
+  let cur = BUFF_IDS.indexOf(p.buffIds[slot]);
+  do { cur=(cur+1)%BUFF_IDS.length; } while(BUFF_IDS[cur]===other);
+  p.buffIds[slot] = BUFF_IDS[cur];
+  buildLobby();
+}
+function cycleBuffPrev(playerIdx, slot){
+  const p = lobbyState.players[playerIdx];
+  const other = p.buffIds[slot===0?1:0];
+  let cur = BUFF_IDS.indexOf(p.buffIds[slot]);
+  do { cur=(cur-1+BUFF_IDS.length)%BUFF_IDS.length; } while(BUFF_IDS[cur]===other);
+  p.buffIds[slot] = BUFF_IDS[cur];
+  buildLobby();
+}
+ 
+function buildBuffPanel(){
+  const container=document.getElementById('buff-player-rows');
+  if(!container) return;
+  container.innerHTML='';
+  lobbyState.players.filter(p=>p.active).forEach((lp)=>{
+    const idx=lobbyState.players.indexOf(lp);
+    const row=document.createElement('div');row.className='buff-player-row';
+    const nameEl=`<div class="buff-player-name" style="color:${lp.color}">${lp.name}</div>`;
+    const slots=lp.buffIds.map((bid,slot)=>{
+      const def=BUFF_DEFS.find(b=>b.id===bid)||BUFF_DEFS[0];
+      return `<div class="buff-slot">
+        <div class="buff-slot-label">Buff ${slot+1}</div>
+        <button class="buff-arrow" onclick="cycleBuffPrev(${idx},${slot})">&#9664;</button>
+        <div class="buff-display" style="border-color:${def.color}">
+          <div class="buff-display-name" style="color:${def.color}">${def.name}</div>
+          <div class="buff-display-desc">${def.desc}</div>
+        </div>
+        <button class="buff-arrow" onclick="cycleBuffNext(${idx},${slot})">&#9654;</button>
+      </div>`;
+    }).join('');
+    row.innerHTML=nameEl+`<div class="buff-slots">${slots}</div>`;
+    container.appendChild(row);
+  });
+}
+// ────────────────────────────────────────────────────────
  
 function togglePlayer(i){lobbyState.players[i].active=!lobbyState.players[i].active;buildLobby();validateStart();}
 function updatePlayer(i,field,val){
@@ -552,8 +752,10 @@ function startGame(){
     const speed=rpg?rpg.speed:BASE_SPEED;
     const startSz=rpg?rpg.startSz:3;
     const body=buildSpawnBody(spawn.x,spawn.y,spawn.dx,Math.max(3,startSz));
-    const phaseCharges=rpg&&rpg.hasPhase?(rpg.dualPhase?2:1):0;
-    const phaseDuration=rpg?rpg.phaseDuration:1500;
+    // Core phase: starts with 1 charge at PHASE_DURATION_BASE
+    // maxrpg: use save-derived values
+    const phaseCharges = rpg&&rpg.hasPhase ? (rpg.dualPhase?2:1) : (isRpg&&lp.coreId==='phase'?1:0);
+    const phaseDuration = rpg ? rpg.phaseDuration : PHASE_DURATION_BASE;
     return{
       id:i,name:lp.name,color:lp.color,keys:{...lp.keys},
       body,dx:spawn.dx,dy:0,inputQueue:[],
@@ -566,6 +768,13 @@ function startGame(){
       tickAccum:0,respawnTimer:0,deathCount:0,
       // RPG core state (null in non-rpg modes)
       core: isRpg ? makeCoreSt(lp.coreId) : null,
+      // Side buffs: array of active buff IDs (always present, empty in non-buffed modes)
+      buffIds: lp.buffIds ? [...lp.buffIds] : [],
+      // Buff runtime state
+      _moltAppleCount: 0,       // for Molt: counts apples toward 15
+      _lengthMilestone: 0,      // for Growth Bonus: last milestone length
+      _quickTurnLast: null,     // for Quick Turn: {dx,dy,time} of last direction press
+      _quickTurnGrace: false,   // currently in reversal grace period
     };
   });
  
@@ -592,7 +801,14 @@ function startGame(){
   buildHUD(players);
   let hint=players.map(p=>`${p.name}: ${p.keys.up}/${p.keys.left}/${p.keys.down}/${p.keys.right}`).join('   ·   ');
   if(sharedRpg&&sharedRpg.hasPhase)hint+='   |   Phase: P1=Space  P2=Shift  P3=Tab';
-  if(isRpg)hint+='   |   Phase core → Space/Shift/Tab';
+  if(isRpg){
+    const coreHints=gameState.players.map((p,si)=>{
+      if(!p.core) return null;
+      const def=CORE_DEFS[p.core.id];
+      return `${p.name} [${ACTION_KEY_LABELS[si]||'?'}]: ${def.tiers[0].name}`;
+    }).filter(Boolean);
+    if(coreHints.length) hint+='   |   '+coreHints.join('  ·  ');
+  }
   document.getElementById('controls-hint-game').textContent=hint;
  
   document.getElementById('lobby').classList.remove('active');
@@ -616,7 +832,8 @@ function buildHUD(players){
     card.innerHTML=`<div class="hud-name" style="color:${p.color}">${p.name}</div>
       <div class="hud-score" id="hud-score-${p.id}" style="color:${p.color}">0</div>
       <div class="hud-status" id="hud-status-${p.id}"></div>
-      ${p.core?`<div class="hud-core-bar"><div class="hud-core-fill" id="hud-core-fill-${p.id}" style="background:${CORE_DEFS[p.core.id].color};width:0%"></div></div><div class="hud-core-label" id="hud-core-label-${p.id}"></div>`:''}`;
+      ${p.core?`<div class="hud-core-bar"><div class="hud-core-fill" id="hud-core-fill-${p.id}" style="background:${CORE_DEFS[p.core.id].color};width:0%"></div></div><div class="hud-core-label" id="hud-core-label-${p.id}">[${ACTION_KEY_LABELS[p.id]||'?'}] ${CORE_DEFS[p.core.id].tiers[0].name}</div>`:''}
+      <div class="hud-buffs" id="hud-buffs-${p.id}" style="font-size:.48em;color:#444;margin-top:2px;"></div>`;
     hud.appendChild(card);
   });
   const tc=document.createElement('div');tc.className='hud-card';tc.style.borderTop='3px solid #333';tc.style.minWidth='90px';
@@ -647,7 +864,8 @@ function coreIs(p, id){ return p.core && p.core.id===id; }
 function coreTier(p){ return p.core ? p.core.tier : -1; }
 function coreAtLeast(p, id, tier){ return coreIs(p,id) && p.core.tier>=tier; }
  
-// Phase Core: has phase ability at tier 0+
+// Phase Core helpers
+// coreAtLeast checks the RPG core; rpg checks maxrpg save-based abilities
 function hasCorePhase(p){ return coreAtLeast(p,'phase',0) || (p.rpg&&p.rpg.hasPhase); }
 function hasDualPhase(p){ return coreAtLeast(p,'phase',3) || (p.rpg&&p.rpg.dualPhase); }
 function hasPhaseCharge(p){ return coreAtLeast(p,'phase',1) || (p.rpg&&p.rpg.phaseCharge); }
@@ -675,6 +893,13 @@ function gameTick(now){
     }
     p.tickAccum+=dt;if(p.tickAccum<p.speed)return;p.tickAccum=0;
     applyQueuedDirection(p);
+ 
+    // Slipstream buff: each segment beyond 5 gives −1ms speed (max −40ms)
+    if(hasBuff(p,'length_speed')){
+      const bonus=Math.min(40, Math.max(0, p.body.length-5));
+      p.speed=Math.max(BASE_SPEED-40, BASE_SPEED-bonus);
+    }
+ 
     movePlayer(p);
   });
  
@@ -734,11 +959,24 @@ function movePlayer(p){
     }
   }
  
-  if(rules.selfCollide&&!p.ghost&&!p.phaseActive){
+  // Quick Turn grace: skip self-collision on the reversal tick
+  if(p._quickTurnGrace){ p._quickTurnGrace=false; }
+  else if(rules.selfCollide&&!p.ghost&&!p.phaseActive){
     if(p.body.some(s=>s.x===head.x&&s.y===head.y)){
       if(rpg&&rpg.immortalPhase&&!p.phaseCD&&p.phaseCharges>0){triggerPhase(p);return;}
       if(!p.insuranceUsed&&(rpg&&rpg.soulInsurance)){p.insuranceUsed=true;const rl=Math.max(3,Math.floor(p.body.length/2));p.body=buildSpawnBody(p.body[0].x,p.body[0].y,p.dx,rl);p.ghost=true;setTimeout(()=>{if(p)p.ghost=false;},2000);return;}
       killPlayer(p,null);return;
+    }
+  }
+ 
+  // Growth Bonus buff: every 10 segments grants a random buff effect for 8s
+  if(hasBuff(p,'length_buff')){
+    const milestone=Math.floor(p.body.length/10)*10;
+    if(milestone>=10 && milestone>p._lengthMilestone){
+      p._lengthMilestone=milestone;
+      const eff=LENGTH_BUFF_EFFECTS[Math.floor(Math.random()*LENGTH_BUFF_EFFECTS.length)];
+      eff(p);
+      showCarnivalToast(`${p.name}: Length Bonus!`,'#4ecca3');
     }
   }
  
@@ -838,15 +1076,48 @@ function collectApple(p,a){
   p.growCount+=grow;
   p.applesEaten++;
   if(rpg&&rpg.phaseCharge&&p.phaseCD)reducePhaseCooldown(p,0.5);
-  if(hasPhaseCharge(p)&&p.phaseActive&&coreIs(p,'phase'))addCoreXP(p,CORE_DEFS.phase.xpPerApplePhasing-CORE_DEFS.phase.xpPerApple);
+  // Phase Charge (tier 1): eating apples while CD is ticking reduces CD by 0.5s
+  if(hasPhaseCharge(p) && p.phaseCD) reducePhaseCooldown(p, 0.5);
+  // Phase Expertise (tier 2): double XP while actively phasing
+  if(coreIs(p,'phase') && p.phaseActive && p.core.tier >= 2){
+    addCoreXP(p, CORE_DEFS.phase.xpPerApplePhasing); // extra +4 on top of the base +4 below
+  }
   if(rpg&&rpg.dualAppleLevel>0){const dc=Math.min(55,rpg.dualAppleLevel*11);if(Math.random()*100<dc)spawnBonusApple(rpg);}
   if(p._dualApple>0){p._dualApple--;spawnBonusApple(rpg);}
   if(a.ability){a.ability.apply(p);showCarnivalToast(`${p.name}: ${a.ability.name}`,a.ability.color);}
-  // Core XP from apple
+ 
+  // ── SIDE BUFF EFFECTS ON APPLE EAT ──────────────────────
+  // Molt: every 15 apples shed 2 tail segments (passive molt — different from Shedding Core)
+  if(hasBuff(p,'molt')){
+    p._moltAppleCount=(p._moltAppleCount||0)+1;
+    if(p._moltAppleCount>=15){
+      p._moltAppleCount=0;
+      const moltCount=Math.min(2, p.body.length-3);
+      for(let mi=0;mi<moltCount;mi++) p.body.pop(); // silent drop, no shed pieces
+    }
+  }
+ 
+  // Echo Growth buff: every 5th apple gives +2 free growth
+  if(hasBuff(p,'echo_growth')){
+    // p.applesEaten is incremented above already
+    if(p.applesEaten%5===0) p.growCount+=2;
+  }
+ 
+  // Dual Apple buff: 22% chance to spawn a bonus apple
+  if(hasBuff(p,'dual_apple')){
+    if(Math.random()<0.22){
+      const spot=randomEmptySpot(gameState.players,gameState.apples,gameState.gridW,gameState.gridH);
+      if(spot) gameState.apples.push(newApple(spot,rpg,gameState.mode));
+    }
+  }
+ 
+  // Core XP from apple — with Gold Apple (+15%) and XP Surge (+25%) buff multipliers
   if(p.core){
     const def=CORE_DEFS[p.core.id];
-    // Phase core bonus while phasing: extra XP applied above, now add base
-    addCoreXP(p,def.xpPerApple);
+    let xpGain=def.xpPerApple;
+    if(hasBuff(p,'gold_apple'))  xpGain*=1.15;
+    if(hasBuff(p,'xp_boost'))    xpGain*=1.25;
+    addCoreXP(p, Math.ceil(xpGain));
   }
 }
  
@@ -854,36 +1125,63 @@ function spawnBonusApple(rpg){const spot=randomEmptySpot(gameState.players,gameS
 function showCarnivalToast(msg,color){const el=document.getElementById('carnival-toast');el.textContent=msg;el.style.color=color;el.style.borderColor=color;el.style.background='rgba(0,0,0,.82)';el.classList.add('show');clearTimeout(el._t);el._t=setTimeout(()=>el.classList.remove('show'),2400);}
  
 // ════════════════════════════════════════════════════════
-// PHASE (1:1 from single-player)
+// PHASE — action-key activated core ability
+// Base: 5s duration, 7.5s cooldown (PHASE_DURATION_BASE / PHASE_CD_BASE)
+// Dual Phase tier: 2 charges, duration×2, cooldown×2
 // ════════════════════════════════════════════════════════
-function triggerPhase(p){
-  if(!hasCorePhase(p)&&!p.phaseCharges) return;
-  if(p.phaseCD) return;
-  // Core phase doesn't use charges the same way — it has a flat 1 charge (2 if dualPhase tier)
-  const charges=hasDualPhase(p)?2:1;
-  if(p.phaseCharges<=0&&hasCorePhase(p)){
-    // Core phase: re-initialise charges if cooldown expired
-    if(!p.phaseCD) p.phaseCharges=charges;
-  }
-  if(p.phaseCharges<=0) return;
-  p.phaseActive=true;p.phaseCharges=Math.max(0,p.phaseCharges-1);
-  clearTimeout(p.phaseTimeout);
-  p.phaseTimeout=setTimeout(()=>{
-    p.phaseActive=false;
-    if(p.phaseCharges<=0){
-      p.phaseCD=true;
-      const cdMs=1500+Math.floor(p.phaseDuration*1.25);
-      p._phaseCDEnd=Date.now()+cdMs;clearTimeout(p.phaseCDTimer);
-      p.phaseCDTimer=setTimeout(()=>{p.phaseCD=false;p.phaseCharges=hasDualPhase(p)?2:1;p._phaseCDEnd=0;},cdMs);
-    }
-  },p.phaseDuration||1500);
+function getPhaseDuration(p){
+  const base = p.phaseDuration || PHASE_DURATION_BASE;
+  // For core phase players phaseDuration is set to PHASE_DURATION_BASE at spawn
+  // Dual Phase doubles the duration
+  return hasDualPhase(p) ? base * 2 : base;
 }
-function reducePhaseCooldown(p,seconds){
+function getPhaseCooldown(p){
+  const base = PHASE_CD_BASE;
+  return hasDualPhase(p) ? base * 2 : base;
+}
+ 
+function triggerPhase(p){
+  if(!hasCorePhase(p)) return;
+  if(p.phaseCD) return;
+  const maxCharges = hasDualPhase(p) ? 2 : 1;
+  if(p.phaseCharges <= 0) p.phaseCharges = maxCharges; // safety reset
+  if(p.phaseCharges <= 0) return;
+  p.phaseActive = true;
+  p.phaseCharges = Math.max(0, p.phaseCharges - 1);
+  clearTimeout(p.phaseTimeout);
+  const dur = getPhaseDuration(p);
+  p.phaseTimeout = setTimeout(()=>{
+    p.phaseActive = false;
+    if(p.phaseCharges <= 0){
+      p.phaseCD = true;
+      const cdMs = getPhaseCooldown(p);
+      p._phaseCDEnd = Date.now() + cdMs;
+      clearTimeout(p.phaseCDTimer);
+      p.phaseCDTimer = setTimeout(()=>{
+        p.phaseCD = false;
+        p.phaseCharges = hasDualPhase(p) ? 2 : 1;
+        p._phaseCDEnd = 0;
+      }, cdMs);
+    }
+  }, dur);
+}
+ 
+function reducePhaseCooldown(p, seconds){
   if(!p.phaseCD) return;
   clearTimeout(p.phaseCDTimer);
-  const remain=Math.max(0,(p._phaseCDEnd-Date.now())-seconds*1000);
-  if(remain<=0){p.phaseCD=false;p.phaseCharges=hasDualPhase(p)?2:1;p._phaseCDEnd=0;}
-  else{p._phaseCDEnd=Date.now()+remain;p.phaseCDTimer=setTimeout(()=>{p.phaseCD=false;p.phaseCharges=hasDualPhase(p)?2:1;p._phaseCDEnd=0;},remain);}
+  const remain = Math.max(0, (p._phaseCDEnd - Date.now()) - seconds * 1000);
+  if(remain <= 0){
+    p.phaseCD = false;
+    p.phaseCharges = hasDualPhase(p) ? 2 : 1;
+    p._phaseCDEnd = 0;
+  } else {
+    p._phaseCDEnd = Date.now() + remain;
+    p.phaseCDTimer = setTimeout(()=>{
+      p.phaseCD = false;
+      p.phaseCharges = hasDualPhase(p) ? 2 : 1;
+      p._phaseCDEnd = 0;
+    }, remain);
+  }
 }
  
 // ════════════════════════════════════════════════════════
@@ -891,14 +1189,14 @@ function reducePhaseCooldown(p,seconds){
 // ════════════════════════════════════════════════════════
 function killPlayer(p,killedById){
   if(!p.alive) return;p.alive=false;p.deathCount++;
-  if(killedById!==null){const k=gameState.players.find(o=>o.id===killedById);if(k){k.kills++;if(k.core)addCoreXP(k,CORE_DEFS[k.core.id].xpPerKill);}}
+  if(killedById!==null){const k=gameState.players.find(o=>o.id===killedById);if(k){k.kills++;if(k.core){let kxp=CORE_DEFS[k.core.id].xpPerKill;if(hasBuff(k,'xp_boost'))kxp=Math.ceil(kxp*1.25);addCoreXP(k,kxp);}}}
   if(gameState.rules.respawn)p.respawnTimer=3000;
 }
 function respawnPlayer(p){
   const{gridW,gridH}=gameState;const spot=randomEmptySpot(gameState.players,gameState.apples,gridW,gridH);if(!spot)return;
   const rdx=Math.random()<.5?1:-1;const sz=p.rpg?p.rpg.startSz:3;
   p.body=buildSpawnBody(spot.x,spot.y,rdx,Math.max(3,sz));p.dx=rdx;p.dy=0;p.alive=true;p.ghost=true;p.growCount=0;p.inputQueue=[];p.insuranceUsed=false;
-  if(p.core){p.phaseCharges=hasDualPhase(p)?2:1;}
+  if(p.core && coreIs(p,'phase')){ p.phaseCharges = hasDualPhase(p)?2:1; p.phaseCD=false; clearTimeout(p.phaseCDTimer); p._phaseCDEnd=0; }
   setTimeout(()=>{if(p)p.ghost=false;},2000);
 }
  
@@ -935,7 +1233,10 @@ function updateHUD(){
     se.textContent=winCondition==='kills'?`${p.kills} kills`:winCondition==='score'?`${p.score} pts`:winCondition==='longest'?`len ${p.body.length}`:p.alive?'ALIVE':'DEAD';
     const parts=[];
     if(!p.alive&&p.respawnTimer>0)parts.push(`↺ ${Math.ceil(p.respawnTimer/1000)}s`);
-    if(p.phaseActive)parts.push('⚡PHASE');
+    if(p.phaseActive){
+      const dur=getPhaseDuration(p);
+      parts.push('⚡PHASE');
+    }
     else if(p.phaseCD){const rem=Math.max(0,Math.ceil((p._phaseCDEnd-Date.now())/1000));parts.push(`⚡CD ${rem}s`);}
     else if(hasCorePhase(p)&&p.phaseCharges>0)parts.push(`⚡×${p.phaseCharges}`);
     if(p.ghost&&!p.phaseActive)parts.push('GHOST');
@@ -950,17 +1251,28 @@ function updateHUD(){
       const fill=document.getElementById(`hud-core-fill-${p.id}`);
       const label=document.getElementById(`hud-core-label-${p.id}`);
       if(fill&&label){
-        if(p.core.tier>=3){fill.style.width='100%';label.textContent=`${def.tiers[3].name} ✓`;}
+        const ak=ACTION_KEY_LABELS[p.id]||'?';
+        if(p.core.tier>=3){fill.style.width='100%';label.textContent=`[${ak}] ${def.tiers[3].name} ✓`;}
         else{
           const needed=def.xpThresholds[p.core.tier];
           const pct=Math.min(100,Math.round(p.core.xp/needed*100));
           fill.style.width=pct+'%';
-          label.textContent=`${def.tiers[p.core.tier].name} → ${def.tiers[p.core.tier+1].name} (${pct}%)`;
+          label.textContent=`[${ak}] ${def.tiers[p.core.tier].name} → ${def.tiers[p.core.tier+1].name} (${pct}%)`;
         }
       }
     }
  
     const card=document.getElementById(`hud-${p.id}`);if(card)card.style.opacity=p.alive?'1':'0.45';
+ 
+    // Update buff display
+    const buffEl=document.getElementById(`hud-buffs-${p.id}`);
+    if(buffEl&&p.buffIds&&p.buffIds.length){
+      buffEl.innerHTML=p.buffIds.map(bid=>{
+        const bd=BUFF_DEFS.find(b=>b.id===bid);
+        if(!bd) return '';
+        return `<span class="hud-buff-tag" style="color:${bd.color};border-color:${bd.color}22;background:${bd.color}11">${bd.name}</span>`;
+      }).join('');
+    }
   });
   const te=document.getElementById('hud-timer');
   if(te){
@@ -1105,11 +1417,29 @@ window.addEventListener('keydown',e=>{
     if(key===k.right) next={dx:1, dy:0};
     if(next){queueDir(p,next);e.preventDefault();}
   });
-  // Phase: Space=P1, Shift=P2, Tab=P3
-  const phaseMap={' ':0,'Shift':1,'Tab':2};
-  if(phaseMap[key]!==undefined){
-    const p=gameState.players[phaseMap[key]];
-    if(p&&p.alive&&hasCorePhase(p)){triggerPhase(p);e.preventDefault();}
+  // Action keys: Q=P1, Y=P2, Ctrl=P3
+  // Each player uses their action key to activate their core ability
+  ACTION_KEYS.forEach((ak,slot)=>{
+    const matched = e.key===ak || e.key.toLowerCase()===ak.toLowerCase();
+    if(!matched) return;
+    const p=gameState.players[slot];
+    if(!p||!p.alive||!p.core) return;
+    if(p.core.id==='phase' && hasCorePhase(p)){
+      triggerPhase(p);
+      e.preventDefault();
+    } else if(p.core.id==='shedding'){
+      // Manual shed: action key triggers immediate shed of 3 segments
+      doShed(p,3);
+      e.preventDefault();
+    }
+  });
+  // maxrpg phase (no core object): Space=P1, Shift=P2, Tab=P3
+  if(gameState.mode!=='rpg'){
+    const legacyMap={' ':0,'Shift':1,'Tab':2};
+    if(legacyMap[key]!==undefined){
+      const p=gameState.players[legacyMap[key]];
+      if(p&&p.alive&&p.rpg&&p.rpg.hasPhase){triggerPhase(p);e.preventDefault();}
+    }
   }
 });
  
