@@ -106,6 +106,23 @@ body{background:var(--dark);color:#fff;font-family:'Segoe UI',sans-serif;min-hei
 .core-display-key{font-size:.7em;background:#1a1a1a;border:1px solid #333;border-radius:3px;padding:1px 5px;margin-left:6px;color:#888;font-weight:normal;vertical-align:middle;}
 .core-display-chain{font-size:.68em;color:#555;line-height:1.8;display:flex;flex-direction:column;gap:2px;margin-top:4px;}
 .cti{display:block;}.ctd{color:#3a3a3a;}
+
+/* SIDE BUFF GRID */
+#side-buff-panel{display:none;max-width:900px;width:100%;}
+#side-buff-panel.visible{display:block;}
+#side-buff-panel .panel{border-left:3px solid var(--gold);}
+#side-buff-panel h3{color:var(--gold);}
+#buff-player-rows{display:flex;flex-direction:column;gap:12px;}
+.buff-player-row{padding:10px 0;border-bottom:1px solid #1a1a1a;}
+.buff-player-row:last-child{border-bottom:none;}
+.buff-player-name{font-size:.78em;font-weight:bold;letter-spacing:1px;margin-bottom:8px;}
+.buff-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px;}
+.buff-cell{background:#090909;border:1px solid #262626;border-radius:8px;padding:8px;cursor:pointer;transition:all .12s;}
+.buff-cell:hover{border-color:#4a4a4a;}
+.buff-cell.selected{box-shadow:0 0 0 1px inset currentColor;}
+.buff-cell.disabled{opacity:.45;cursor:not-allowed;}
+.buff-cell-name{font-size:.7em;font-weight:700;line-height:1.2;}
+.buff-cell-desc{font-size:.62em;color:#666;margin-top:4px;line-height:1.35;}
  
 /* GAME SCREEN */
 #game-screen{flex-direction:column;width:100vw;height:100vh;overflow:hidden;}
@@ -114,11 +131,11 @@ body{background:var(--dark);color:#fff;font-family:'Segoe UI',sans-serif;min-hei
 .hud-name{font-size:.65em;letter-spacing:1px;text-transform:uppercase;margin-bottom:2px;}
 .hud-score{font-size:1.3em;font-weight:bold;}
 .hud-status{font-size:.58em;color:#555;margin-top:2px;min-height:12px;}
-.hud-core-bar{height:3px;border-radius:2px;margin-top:4px;background:#1a1a1a;overflow:hidden;}
+.hud-core-bar{height:6px;border-radius:4px;margin-top:5px;background:#1a1a1a;overflow:hidden;}
 .hud-core-fill{height:100%;border-radius:2px;transition:width .3s;}
-.hud-core-label{font-size:.5em;color:#444;margin-top:2px;}
-.hud-buffs{font-size:.48em;color:#444;margin-top:1px;display:flex;flex-wrap:wrap;gap:3px;justify-content:center;}
-.hud-buff-tag{padding:1px 4px;border-radius:3px;border:1px solid;font-size:.9em;}
+.hud-core-label{font-size:.62em;color:#888;margin-top:4px;font-weight:700;letter-spacing:.3px;}
+.hud-buffs{font-size:.5em;color:#444;margin-top:4px;display:flex;flex-wrap:wrap;gap:4px;justify-content:center;}
+.hud-buff-tag{padding:2px 5px;border-radius:4px;border:1px solid;white-space:nowrap;}
 #canvas-wrap{position:relative;flex:1;overflow:hidden;}
 #game-canvas{display:block;background:#000;image-rendering:pixelated;width:100%;height:100%;}
 #game-overlay{position:absolute;inset:0;background:rgba(0,0,0,.88);display:none;align-items:center;justify-content:center;flex-direction:column;gap:12px;z-index:20;}
@@ -210,7 +227,7 @@ body{background:var(--dark);color:#fff;font-family:'Segoe UI',sans-serif;min-hei
   </div>
  
   <!-- Side Buff Selection — always visible -->
-  <div id="side-buff-panel" class="visible">
+  <div id="side-buff-panel">
     <div class="panel">
       <h3>★ Side Buffs — Pick 2 per player</h3>
       <p style="font-size:.72em;color:#666;margin-bottom:10px;line-height:1.5;">
@@ -288,11 +305,11 @@ const PHASE_CD_BASE       = 7500;
 // CORE DEFINITIONS
 // Each core has 4 tiers (index 0 = base, 1-3 = upgrades).
 // xpThresholds[i] = XP needed to unlock tier i+1 from tier i.
-// Intentionally non-linear AND slowed: base ~80 XP (+71 passive≈10s),
-// then each subsequent tier adds another ~71 XP worth of passive time.
-//   Tier 0→1: 160  (≈10 s slower than the original 80)
-//   Tier 1→2: 300  (≈10 s slower than 160 at the same rate)
-//   Tier 2→3: 520  (≈10 s slower than 300)
+// Intentionally non-linear AND slowed. Added +10s to each stage.
+// 1 passive XP/tick with tick=140ms => ~71 XP per 10 seconds.
+//   Tier 0→1: 231
+//   Tier 1→2: 371
+//   Tier 2→3: 591
 // 1 passive XP/tick, tick=140ms → 71 ticks≈10s = +71 XP per "10 seconds"
 // ════════════════════════════════════════════════════════
 const CORE_DEFS = {
@@ -310,8 +327,7 @@ const CORE_DEFS = {
       { name:'Dual Phase',
         desc:'2 charges before cooldown. Phase duration and cooldown both doubled (10s / 15s).' },
     ],
-    // Thresholds slowed by ~71 XP (10 s of passive ticks) each step
-    xpThresholds: [160, 300, 520],
+    xpThresholds: [231, 371, 591],
     xpPerApple:   4,
     xpPerKill:    40,
     // Phase Expertise bonus: +4 extra XP per apple while phasing (double rate)
@@ -331,7 +347,7 @@ const CORE_DEFS = {
       { name:'Shedding Bricks',
         desc:'Shed pieces become solid walls for enemies lasting 15 seconds.' },
     ],
-    xpThresholds: [160, 300, 520],
+    xpThresholds: [231, 371, 591],
     xpPerApple:   4,
     xpPerKill:    40,
     xpPerShedEat: 16,
@@ -481,14 +497,29 @@ function stopBgAnimation(){if(bgAnimId){cancelAnimationFrame(bgAnimId);bgAnimId=
 // ════════════════════════════════════════════════════════
 // BUFF HELPER
 // ════════════════════════════════════════════════════════
-function hasBuff(p, id){ return p.buffIds && p.buffIds.includes(id); }
+function hasBuff(p, id){ return gameState&&gameState.mode==='rpg'&&p.buffIds&&p.buffIds.includes(id); }
  
 // ════════════════════════════════════════════════════════
 // INPUT HELPERS (ported from single-player)
-// Quick Turn buff: double-tap opposite direction within 200ms to reverse.
-// When the reversal fires we set _quickTurnGrace so self-collision is skipped that tick.
+// Quick Turn buff: double-tap opposite direction within 200ms to swap head/tail.
 // ════════════════════════════════════════════════════════
 function isOppositeDirection(a,b){return a.dx===-b.dx&&a.dy===-b.dy;}
+
+function normalizeDelta(v,mod){
+  if(v>1) return v-mod;
+  if(v<-1) return v+mod;
+  return v;
+}
+
+function quickTurnSwapHeadTail(p){
+  if(!gameState||p.body.length<2) return;
+  p.body.reverse();
+  const head=p.body[0],neck=p.body[1];
+  let ndx=normalizeDelta(head.x-neck.x,gameState.gridW);
+  let ndy=normalizeDelta(head.y-neck.y,gameState.gridH);
+  if(Math.abs(ndx)+Math.abs(ndy)!==1){ndx=-p.dx;ndy=-p.dy;}
+  p.dx=ndx;p.dy=ndy;
+}
  
 function queueDir(p,next){
   if(!next) return;
@@ -502,10 +533,9 @@ function queueDir(p,next){
       if(p._quickTurnLast &&
          p._quickTurnLast.dx===next.dx && p._quickTurnLast.dy===next.dy &&
          now-p._quickTurnLast.time < 200){
-        // Force-apply the reversal immediately, bypassing queue
-        p.dx=next.dx; p.dy=next.dy;
+        // Swap body orientation immediately, bypassing queue
+        quickTurnSwapHeadTail(p);
         p.inputQueue=[];       // clear any queued turns
-        p._quickTurnGrace=true; // skip self-collision this step
         p._quickTurnLast=null;
         return;
       }
@@ -604,25 +634,6 @@ function buildCorePanel(){
 }
  
 // ── BUFF PANEL ──────────────────────────────────────────
-const BUFF_IDS = BUFF_DEFS.map(b=>b.id);
- 
-function cycleBuffNext(playerIdx, slot){
-  const p = lobbyState.players[playerIdx];
-  const other = p.buffIds[slot===0?1:0];
-  let cur = BUFF_IDS.indexOf(p.buffIds[slot]);
-  do { cur=(cur+1)%BUFF_IDS.length; } while(BUFF_IDS[cur]===other);
-  p.buffIds[slot] = BUFF_IDS[cur];
-  buildLobby();
-}
-function cycleBuffPrev(playerIdx, slot){
-  const p = lobbyState.players[playerIdx];
-  const other = p.buffIds[slot===0?1:0];
-  let cur = BUFF_IDS.indexOf(p.buffIds[slot]);
-  do { cur=(cur-1+BUFF_IDS.length)%BUFF_IDS.length; } while(BUFF_IDS[cur]===other);
-  p.buffIds[slot] = BUFF_IDS[cur];
-  buildLobby();
-}
- 
 function buildBuffPanel(){
   const container=document.getElementById('buff-player-rows');
   if(!container) return;
@@ -630,24 +641,29 @@ function buildBuffPanel(){
   lobbyState.players.filter(p=>p.active).forEach((lp)=>{
     const idx=lobbyState.players.indexOf(lp);
     const row=document.createElement('div');row.className='buff-player-row';
-    const nameEl=`<div class="buff-player-name" style="color:${lp.color}">${lp.name}</div>`;
-    const slots=lp.buffIds.map((bid,slot)=>{
-      const def=BUFF_DEFS.find(b=>b.id===bid)||BUFF_DEFS[0];
-      return `<div class="buff-slot">
-        <div class="buff-slot-label">Buff ${slot+1}</div>
-        <button class="buff-arrow" onclick="cycleBuffPrev(${idx},${slot})">&#9664;</button>
-        <div class="buff-display" style="border-color:${def.color}">
-          <div class="buff-display-name" style="color:${def.color}">${def.name}</div>
-          <div class="buff-display-desc">${def.desc}</div>
-        </div>
-        <button class="buff-arrow" onclick="cycleBuffNext(${idx},${slot})">&#9654;</button>
-      </div>`;
+    const nameEl=`<div class="buff-player-name" style="color:${lp.color}">${lp.name} — pick up to 2</div>`;
+    const cells=BUFF_DEFS.map(def=>{
+      const selected=lp.buffIds.includes(def.id);
+      const atLimit=lp.buffIds.length>=2;
+      const disabled=!selected&&atLimit;
+      return `<button class="buff-cell ${selected?'selected':''} ${disabled?'disabled':''}" style="color:${def.color};border-color:${selected?def.color:'#262626'}" onclick="toggleBuff(${idx},'${def.id}')">
+        <div class="buff-cell-name">${def.name}</div>
+        <div class="buff-cell-desc">${def.desc}</div>
+      </button>`;
     }).join('');
-    row.innerHTML=nameEl+`<div class="buff-slots">${slots}</div>`;
+    row.innerHTML=nameEl+`<div class="buff-grid">${cells}</div>`;
     container.appendChild(row);
   });
 }
 // ────────────────────────────────────────────────────────
+
+function toggleBuff(playerIdx,buffId){
+  const p=lobbyState.players[playerIdx];
+  const has=p.buffIds.includes(buffId);
+  if(has)p.buffIds=p.buffIds.filter(id=>id!==buffId);
+  else if(p.buffIds.length<2)p.buffIds.push(buffId);
+  buildLobby();
+}
  
 function togglePlayer(i){lobbyState.players[i].active=!lobbyState.players[i].active;buildLobby();validateStart();}
 function updatePlayer(i,field,val){
@@ -662,6 +678,7 @@ function selectMode(mode,el){
   document.querySelectorAll('.mode-btn').forEach(b=>b.classList.remove('selected'));el.classList.add('selected');
   document.getElementById('shared-save-panel').classList.toggle('visible',mode==='maxrpg');
   document.getElementById('rpg-core-panel').classList.toggle('visible',mode==='rpg');
+  document.getElementById('side-buff-panel').classList.toggle('visible',mode==='rpg');
 }
  
 function selectWin(win,el){
@@ -768,18 +785,17 @@ function startGame(){
       tickAccum:0,respawnTimer:0,deathCount:0,
       // RPG core state (null in non-rpg modes)
       core: isRpg ? makeCoreSt(lp.coreId) : null,
-      // Side buffs: array of active buff IDs (always present, empty in non-buffed modes)
-      buffIds: lp.buffIds ? [...lp.buffIds] : [],
+      // Side buffs only apply in RPG mode (not maxrpg/classic/carnival)
+      buffIds: isRpg && lp.buffIds ? [...lp.buffIds] : [],
       // Buff runtime state
       _moltAppleCount: 0,       // for Molt: counts apples toward 15
       _lengthMilestone: 0,      // for Growth Bonus: last milestone length
       _quickTurnLast: null,     // for Quick Turn: {dx,dy,time} of last direction press
-      _quickTurnGrace: false,   // currently in reversal grace period
     };
   });
  
   const apples=[];
-  for(let i=0;i<Math.max(2,activeLobbyPlayers.length);i++){
+  for(let i=0;i<Math.max(5,activeLobbyPlayers.length+2);i++){
     const spot=randomEmptySpot(players,apples,gridW,gridH);
     if(spot)apples.push(newApple(spot,sharedRpg,lobbyState.mode));
   }
@@ -829,10 +845,14 @@ function buildHUD(players){
   const hud=document.getElementById('hud');hud.innerHTML='';
   players.forEach(p=>{
     const card=document.createElement('div');card.className='hud-card';card.id=`hud-${p.id}`;card.style.borderTop=`3px solid ${p.color}`;
+    if(p.core){
+      const cc=CORE_DEFS[p.core.id].color;
+      card.style.boxShadow=`0 0 0 1px ${cc}55 inset, 0 0 14px ${cc}22`;
+    }
     card.innerHTML=`<div class="hud-name" style="color:${p.color}">${p.name}</div>
       <div class="hud-score" id="hud-score-${p.id}" style="color:${p.color}">0</div>
       <div class="hud-status" id="hud-status-${p.id}"></div>
-      ${p.core?`<div class="hud-core-bar"><div class="hud-core-fill" id="hud-core-fill-${p.id}" style="background:${CORE_DEFS[p.core.id].color};width:0%"></div></div><div class="hud-core-label" id="hud-core-label-${p.id}">[${ACTION_KEY_LABELS[p.id]||'?'}] ${CORE_DEFS[p.core.id].tiers[0].name}</div>`:''}
+      ${p.core?`<div class="hud-core-bar"><div class="hud-core-fill" id="hud-core-fill-${p.id}" style="background:${CORE_DEFS[p.core.id].color};width:0%"></div></div><div class="hud-core-label" id="hud-core-label-${p.id}" style="color:${CORE_DEFS[p.core.id].color}">[${ACTION_KEY_LABELS[p.id]||'?'}] ${CORE_DEFS[p.core.id].tiers[0].name}</div>`:''}
       <div class="hud-buffs" id="hud-buffs-${p.id}" style="font-size:.48em;color:#444;margin-top:2px;"></div>`;
     hud.appendChild(card);
   });
@@ -959,9 +979,7 @@ function movePlayer(p){
     }
   }
  
-  // Quick Turn grace: skip self-collision on the reversal tick
-  if(p._quickTurnGrace){ p._quickTurnGrace=false; }
-  else if(rules.selfCollide&&!p.ghost&&!p.phaseActive){
+  if(rules.selfCollide&&!p.ghost&&!p.phaseActive){
     if(p.body.some(s=>s.x===head.x&&s.y===head.y)){
       if(rpg&&rpg.immortalPhase&&!p.phaseCD&&p.phaseCharges>0){triggerPhase(p);return;}
       if(!p.insuranceUsed&&(rpg&&rpg.soulInsurance)){p.insuranceUsed=true;const rl=Math.max(3,Math.floor(p.body.length/2));p.body=buildSpawnBody(p.body[0].x,p.body[0].y,p.dx,rl);p.ghost=true;setTimeout(()=>{if(p)p.ghost=false;},2000);return;}
@@ -1021,7 +1039,7 @@ function movePlayer(p){
     doShed(p,cnt);
   }
  
-  const target=Math.max(2,gameState.players.filter(q=>q.alive).length);
+  const target=Math.max(5,gameState.players.filter(q=>q.alive).length+2);
   while(gameState.apples.length<target){
     const spot=randomEmptySpot(gameState.players,gameState.apples,gridW,gridH);
     if(!spot) break;
@@ -1069,8 +1087,9 @@ function collectApple(p,a){
   const phaseScoreMult=(p.phaseActive&&(hasPhaseExpertise(p)||(rpg&&rpg.phaseGreed)))?1.75:1;
   const phaseGrowMult =(p.phaseActive&&(hasPhaseExpertise(p)||(rpg&&rpg.phaseExpertise)))?1.75:1;
   p.score+=Math.ceil(10*goldMult*goldBonus*phaseScoreMult);
-  const evo=rpg?rpg.evo:1;
-  let grow=Math.ceil(evo*phaseGrowMult);
+  const evoMult=(rpg&&rpg.evo>1)?rpg.evo:1;
+  let grow=Math.ceil(1*phaseGrowMult);
+  if(evoMult>1) grow=Math.ceil(grow*evoMult);
   if(rpg&&rpg.echoGrowthLevel>0){const triggers=Math.floor((p.applesEaten+1)/5)-Math.floor(p.applesEaten/5);if(triggers>0)grow+=2*rpg.echoGrowthLevel*triggers;}
   if(p._echoBonus>0){grow+=p._echoBonus;p._echoBonus=0;}
   p.growCount+=grow;
@@ -1266,12 +1285,12 @@ function updateHUD(){
  
     // Update buff display
     const buffEl=document.getElementById(`hud-buffs-${p.id}`);
-    if(buffEl&&p.buffIds&&p.buffIds.length){
-      buffEl.innerHTML=p.buffIds.map(bid=>{
-        const bd=BUFF_DEFS.find(b=>b.id===bid);
-        if(!bd) return '';
-        return `<span class="hud-buff-tag" style="color:${bd.color};border-color:${bd.color}22;background:${bd.color}11">${bd.name}</span>`;
-      }).join('');
+    if(buffEl){
+      const tags=(p.buffIds||[]).map(bid=>BUFF_DEFS.find(b=>b.id===bid)).filter(Boolean);
+      if((p.buffIds||[]).includes('length_buff')){
+        tags.push({name:'+ Random Proc',color:'#4ecca3'});
+      }
+      buffEl.innerHTML=tags.map(bd=>`<span class="hud-buff-tag" style="color:${bd.color};border-color:${bd.color}66;background:${bd.color}11">${bd.name}</span>`).join('');
     }
   });
   const te=document.getElementById('hud-timer');
