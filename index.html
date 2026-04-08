@@ -106,6 +106,12 @@ body{background:var(--dark);color:#fff;font-family:'Segoe UI',sans-serif;min-hei
 .core-display-key{font-size:.7em;background:#1a1a1a;border:1px solid #333;border-radius:3px;padding:1px 5px;margin-left:6px;color:#888;font-weight:normal;vertical-align:middle;}
 .core-display-chain{font-size:.68em;color:#555;line-height:1.8;display:flex;flex-direction:column;gap:2px;margin-top:4px;}
 .cti{display:block;}.ctd{color:#3a3a3a;}
+.dash-chain-chooser{margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;}
+.dash-chain-choice{flex:1;min-width:150px;text-align:left;background:#0a0a0a;border:1px solid #2a2a2a;color:#777;border-radius:6px;padding:7px 8px;cursor:pointer;transition:all .15s;}
+.dash-chain-choice:hover{border-color:#4a4a4a;color:#bbb;}
+.dash-chain-choice.selected{border-color:#00d2ff;color:#00d2ff;background:#03151a;}
+.dash-chain-choice small{display:block;color:#555;font-size:.62em;line-height:1.35;margin-top:4px;}
+.dash-chain-choice.selected small{color:#5f9cab;}
 
 /* SIDE BUFF GRID */
 #side-buff-panel{display:none;max-width:900px;width:100%;}
@@ -423,10 +429,10 @@ const CORE_DEFS = {
     tiers: [
       { name:'The Speed Snake',
         desc:'Action key: dash forward instantly.' },
-      { name:'Chain Dash',
-        desc:'Can dash twice consecutively. Second dash has reduced effect.' },
-      { name:'SBUD Chain Dash',
-        desc:'Can dash repeatedly with reduced effect each dash. Needs ~3 dashes to match Chain Dash distance.' },
+      { name:'Chain Core',
+        desc:'Unlock chain style: pick Chain Dash or SBUD Chain Dash in core selection.' },
+      { name:'Chain Mastery',
+        desc:'Improves your selected chain style. Chain Dash is stronger burst; SBUD scales with repeated casts.' },
       { name:'Overdash Ark',
         desc:'Dash length increases, cooldown is slightly longer, and dash ends with a small Ark pulse.' },
     ],
@@ -521,9 +527,9 @@ const CARNIVAL_ABILITIES=[
 // ════════════════════════════════════════════════════════
 let lobbyState={
   players:[
-    {active:true, name:'Player 1',color:'#00fbff',controls:'arrows',keys:{...PLAYER_DEFAULTS[0].keys},coreId:'phase',   buffIds:['echo_growth','gold_apple']},
-    {active:false,name:'Player 2',color:'#ff00ff',controls:'wasd',  keys:{...PLAYER_DEFAULTS[1].keys},coreId:'shedding',buffIds:['dual_apple','molt']},
-    {active:false,name:'Player 3',color:'#ffd700',controls:'uhjk',  keys:{...PLAYER_DEFAULTS[2].keys},coreId:'gun',     buffIds:['length_speed','echo_growth']},
+    {active:true, name:'Player 1',color:'#00fbff',controls:'arrows',keys:{...PLAYER_DEFAULTS[0].keys},coreId:'phase',   buffIds:['echo_growth','gold_apple'],dashChainStyle:'chain'},
+    {active:false,name:'Player 2',color:'#ff00ff',controls:'wasd',  keys:{...PLAYER_DEFAULTS[1].keys},coreId:'shedding',buffIds:['dual_apple','molt'],dashChainStyle:'chain'},
+    {active:false,name:'Player 3',color:'#ffd700',controls:'uhjk',  keys:{...PLAYER_DEFAULTS[2].keys},coreId:'gun',     buffIds:['length_speed','echo_growth'],dashChainStyle:'chain'},
   ],
   mode:'classic',
   winCondition:'longest',
@@ -705,6 +711,18 @@ function buildCorePanel(){
       const arrow=i===0?'▶':'→';
       return `<span class="cti">${arrow} <em style="color:${def.color}">${t.name}</em><span class="ctd"> — ${t.desc}</span></span>`;
     }).join('');
+    const dashModeUI=lp.coreId==='dash'?`
+      <div class="dash-chain-chooser">
+        <button class="dash-chain-choice ${lp.dashChainStyle==='chain'?'selected':''}" onclick="setDashChainStyle(${idx},'chain')">
+          Chain Dash
+          <small>Dash twice consecutively. Second dash reduced, but strongest short burst.</small>
+        </button>
+        <button class="dash-chain-choice ${lp.dashChainStyle==='sbud'?'selected':''}" onclick="setDashChainStyle(${idx},'sbud')">
+          SBUD Chain Dash
+          <small>Consecutive dashes decay each use. Around 3 dashes match regular Chain Dash distance.</small>
+        </button>
+      </div>
+    `:'';
     row.innerHTML=`
       <div class="core-player-name" style="color:${lp.color}">${lp.name}</div>
       <div class="core-selector">
@@ -712,6 +730,7 @@ function buildCorePanel(){
         <div class="core-display" style="border-color:${def.color}">
           <div class="core-display-name" style="color:${def.color}">${def.label} <span class="core-display-key">[${actionKey}]</span></div>
           <div class="core-display-chain">${chain}</div>
+          ${dashModeUI}
         </div>
         <button class="core-arrow" onclick="cycleCoreNext(${idx})">&#9654;</button>
       </div>`;
@@ -748,6 +767,13 @@ function toggleBuff(playerIdx,buffId){
   const has=p.buffIds.includes(buffId);
   if(has)p.buffIds=p.buffIds.filter(id=>id!==buffId);
   else if(p.buffIds.length<2)p.buffIds.push(buffId);
+  buildLobby();
+}
+
+function setDashChainStyle(playerIdx, style){
+  const p=lobbyState.players[playerIdx];
+  if(!p) return;
+  p.dashChainStyle=(style==='sbud')?'sbud':'chain';
   buildLobby();
 }
  
@@ -882,6 +908,7 @@ function startGame(){
       dashCDUntil: 0,
       dashChainCount: 0,
       dashChainUntil: 0,
+      dashChainStyle: isRpg ? (lp.dashChainStyle||'chain') : 'chain',
       _coreSuppressedUntil: 0,
     };
   });
@@ -1049,12 +1076,19 @@ function triggerArkPulse(p){
 
 function getDashMultiplierForUse(p, now){
   const tier=dashTier(p);
+  const style=p.dashChainStyle||'chain';
   const inChainWindow=now<(p.dashChainUntil||0);
   const chainCount=inChainWindow?(p.dashChainCount||0):0;
-  if(tier===1){
-    return chainCount===1 ? DASH_CHAIN_SECOND_MULT : 1;
+  // Chain style: reliable double burst.
+  if(style==='chain'){
+    if(chainCount===0) return 1;
+    if(chainCount===1) return DASH_CHAIN_SECOND_MULT;
+    // At higher mastery, allow tiny tail dash in same window.
+    if(tier>=2) return 0.30;
+    return 0.12;
   }
-  if(tier>=2){
+  // SBUD style: geometric decay over repeated dashes.
+  if(style==='sbud'){
     return Math.max(DASH_SBUD_MIN_MULT, Math.pow(DASH_SBUD_DECAY_MULT, chainCount));
   }
   return 1;
@@ -1078,8 +1112,15 @@ function triggerDashCore(p){
   const cd=overdash?DASH_OVERDASH_CD_MS:DASH_CD_MS;
   p.dashCDUntil=now+cd;
   if(overdash){
-    gameState.slowZones.push({x:p.body[0].x,y:p.body[0].y,r:1,until:now+1400,ownerId:p.id,color:CORE_DEFS.dash.color});
+    // 3x3 endpoint ark pulse
+    gameState.slowZones.push({x:p.body[0].x,y:p.body[0].y,r:1,shape:'square',until:now+1400,ownerId:p.id,color:CORE_DEFS.dash.color});
   }
+}
+
+function zoneContainsCell(z,x,y){
+  const dx=Math.abs(x-z.x),dy=Math.abs(y-z.y);
+  if(z.shape==='square') return dx<=z.r&&dy<=z.r;
+  return dx<=z.r&&dy<=z.r;
 }
  
 // ════════════════════════════════════════════════════════
@@ -1130,7 +1171,7 @@ function movePlayer(p){
   // (implemented as: skip this move tick if accumulated time < 2× speed)
   if(!p.phaseActive&&!p._isDashing){
     const now=Date.now();
-    const inSlow=gameState.slowZones.some(z=>z.until>now&&z.ownerId!==p.id&&Math.abs(p.body[0].x-z.x)<=z.r&&Math.abs(p.body[0].y-z.y)<=z.r);
+    const inSlow=gameState.slowZones.some(z=>z.until>now&&z.ownerId!==p.id&&zoneContainsCell(z,p.body[0].x,p.body[0].y));
     if(inSlow){
       // Only move at 60% speed: re-queue the tick (skip every other move)
       p._slowSkip=(p._slowSkip||0)+1;
@@ -1618,11 +1659,9 @@ function draw(){
     const timeLeft=(z.until-now)/3000;
     ctx.globalAlpha=0.18*timeLeft;
     ctx.fillStyle=z.color||'#a020f0';
-    for(let dx=-z.r;dx<=z.r;dx++){
-      for(let dy=-z.r;dy<=z.r;dy++){
-        if(Math.abs(dx)+Math.abs(dy)<=z.r){
-          ctx.fillRect((z.x+dx)*CELL,(z.y+dy)*CELL,CELL,CELL);
-        }
+    for(let dx=-z.r;dx<=z.r;dx++)for(let dy=-z.r;dy<=z.r;dy++){
+      if(z.shape==='square' || Math.abs(dx)+Math.abs(dy)<=z.r){
+        ctx.fillRect((z.x+dx)*CELL,(z.y+dy)*CELL,CELL,CELL);
       }
     }
     ctx.globalAlpha=1;
