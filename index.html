@@ -367,7 +367,7 @@ const CORE_DEFS = {
       { name:'Rear End Armaments',
         desc:'Each shot also fires from your tail.' },
       { name:'Shooting Bricks',
-        desc:'Press action during cooldown to prime brick rounds. Next shot creates brick walls on impact.' },
+        desc:'Press action during cooldown to turn your active soul husks into brick walls.' },
     ],
     xpThresholds: [231, 371, 591],
     xpPerApple:   4,
@@ -818,7 +818,6 @@ function startGame(){
       _lengthMilestone: 0,      // for Growth Bonus: last milestone length
       _quickTurnLast: null,     // for Quick Turn: {dx,dy,time} of last direction press
       gunCDUntil: 0,
-      gunBrickPrimed: false,
     };
   });
  
@@ -1247,11 +1246,11 @@ function getTailDirection(p){
   return {dx,dy};
 }
 
-function fireGunBullet(p, fromTail=false, brick=false){
+function fireGunBullet(p, fromTail=false){
   const origin = fromTail ? p.body[p.body.length-1] : p.body[0];
   const dir = fromTail ? getTailDirection(p) : {dx:p.dx,dy:p.dy};
   if(!origin||(!dir.dx&&!dir.dy)) return;
-  gameState.bullets.push({x:origin.x,y:origin.y,dx:dir.dx,dy:dir.dy,ownerId:p.id,pierce:gunPierces(p),brick});
+  gameState.bullets.push({x:origin.x,y:origin.y,dx:dir.dx,dy:dir.dy,ownerId:p.id,pierce:gunPierces(p)});
 }
 
 function triggerGunShot(p){
@@ -1260,15 +1259,23 @@ function triggerGunShot(p){
   const cd=CORE_DEFS.gun.cooldownMs;
   if(now<p.gunCDUntil){
     if(gunCanBrick(p)){
-      p.gunBrickPrimed=true;
-      showCarnivalToast(`${p.name}: Brick rounds primed`,'#8ab4ff');
+      let converted=0;
+      gameState.bullets=gameState.bullets.filter(b=>{
+        if(b.ownerId!==p.id) return true;
+        gameState.brickWalls.push({x:b.x,y:b.y,until:now+SHEDDING_BRICK_MS,ownerId:p.id,color:p.color});
+        converted++;
+        return false;
+      });
+      if(converted>0){
+        showCarnivalToast(`${p.name}: Shooting Bricks (${converted})`,'#8ab4ff');
+      }else{
+        showCarnivalToast(`${p.name}: No soul husks to convert`,'#8ab4ff');
+      }
     }
     return;
   }
-  const brick=!!p.gunBrickPrimed;
-  fireGunBullet(p,false,brick);
-  if(gunRearShot(p)) fireGunBullet(p,true,brick);
-  p.gunBrickPrimed=false;
+  fireGunBullet(p,false);
+  if(gunRearShot(p)) fireGunBullet(p,true);
   p.gunCDUntil=now+cd;
 }
 
@@ -1278,10 +1285,8 @@ function updateBullets(){
   const kept=[];
   gameState.bullets.forEach(b=>{
     b.x+=b.dx;b.y+=b.dy;
-    if(gameState.rules.wallWrap){
-      b.x=(b.x+gameState.gridW)%gameState.gridW;
-      b.y=(b.y+gameState.gridH)%gameState.gridH;
-    }else if(b.x<0||b.x>=gameState.gridW||b.y<0||b.y>=gameState.gridH){
+    // Projectiles follow legacy behavior: they never wrap with arena walls.
+    if(b.x<0||b.x>=gameState.gridW||b.y<0||b.y>=gameState.gridH){
       return;
     }
     const wallHit=gameState.brickWalls.find(w=>w.until>now&&w.ownerId!==b.ownerId&&w.x===b.x&&w.y===b.y);
@@ -1294,11 +1299,10 @@ function updateBullets(){
       if(hitIdx===-1) continue;
       const shooter=gameState.players.find(p=>p.id===b.ownerId);
       if(!shooter) break;
-      if(b.brick){
-        gameState.brickWalls.push({x:b.x,y:b.y,until:now+SHEDDING_BRICK_MS,ownerId:shooter.id,color:shooter.color});
+      if(hitIdx===0 || enemy.body.length<=1){
+        killPlayer(enemy,shooter.id);
       }else{
-        if(enemy.body.length>1) enemy.body.pop();
-        else killPlayer(enemy,shooter.id);
+        enemy.body.splice(hitIdx,1);
         shooter.growCount+=1;
       }
       if(!b.pierce){consumed=true;break;}
@@ -1371,7 +1375,6 @@ function updateHUD(){
       const gr=Math.max(0,Math.ceil((p.gunCDUntil-Date.now())/1000));
       if(gr>0) parts.push(`🔫CD ${gr}s`);
       else parts.push('🔫READY');
-      if(p.gunBrickPrimed) parts.push('🧱ROUNDS');
     }
     ste.textContent=parts.join(' · ');
  
@@ -1472,9 +1475,12 @@ function draw(){
  
   // Bullets (Gun Core)
   (gameState.bullets||[]).forEach(b=>{
-    ctx.fillStyle=b.brick?'#ffd700':'#8ab4ff';ctx.shadowColor=ctx.fillStyle;ctx.shadowBlur=8;
-    ctx.fillRect(b.x*CELL+6,b.y*CELL+6,CELL-12,CELL-12);
-    ctx.shadowBlur=0;
+    // Legacy projectile rendering
+    ctx.fillStyle='#8ab4ff';
+    ctx.fillRect(b.x*CELL+5,b.y*CELL+5,CELL-10,CELL-10);
+    ctx.strokeStyle='#d9e8ff';
+    ctx.lineWidth=1;
+    ctx.strokeRect(b.x*CELL+5,b.y*CELL+5,CELL-10,CELL-10);
   });
 
   // Apples (S2 style: +2 offset, size-4, shadowBlur=10)
