@@ -303,6 +303,8 @@ const PHASE_DURATION_BASE = 5000 + CORE_TIME_BONUS_MS;
 const PHASE_CD_BASE       = 7500 + CORE_TIME_BONUS_MS;
 const SHEDDING_SLOW_ZONE_MS = 3000 + CORE_TIME_BONUS_MS;
 const SHEDDING_BRICK_MS     = 15000 + CORE_TIME_BONUS_MS;
+const ARK_SLOW_MS           = 3000;
+const ARK_DISABLE_MS        = 3500;
  
 // ════════════════════════════════════════════════════════
 // CORE DEFINITIONS
@@ -373,6 +375,29 @@ const CORE_DEFS = {
     xpPerApple:   4,
     xpPerKill:    40,
     cooldownMs:   3000,
+  },
+  ark: {
+    id:    'ark',
+    label: 'Ark Core',
+    color: '#6ef5ff',
+    tiers: [
+      { name:'Ark Core',
+        desc:'Action key emits an ark pulse that slows one enemy snake in range.' },
+      { name:'Ark Chain',
+        desc:'Ark pulse chains to every enemy snake in range instead of only one.' },
+      { name:'Ark Overcharge',
+        desc:'Ark pulse gets bigger range and a shorter cooldown.' },
+      { name:'Ark Burst',
+        desc:'Also disables enemy boosts and breaks enemy molted walls in a smaller burst radius.' },
+    ],
+    xpThresholds: [231, 371, 591],
+    xpPerApple:   4,
+    xpPerKill:    40,
+    cooldownMs:   9000,
+    cooldownMsOvercharge: 5000,
+    range: 5,
+    rangeOvercharge: 7,
+    burstRadius: 2,
   },
 };
  
@@ -462,7 +487,7 @@ const CARNIVAL_ABILITIES=[
 let lobbyState={
   players:[
     {active:true, name:'Player 1',color:'#00fbff',controls:'arrows',keys:{...PLAYER_DEFAULTS[0].keys},coreId:'phase',   buffIds:['echo_growth','gold_apple']},
-    {active:false,name:'Player 2',color:'#ff00ff',controls:'wasd',  keys:{...PLAYER_DEFAULTS[1].keys},coreId:'shedding',buffIds:['dual_apple','molt']},
+    {active:false,name:'Player 2',color:'#ff00ff',controls:'wasd',  keys:{...PLAYER_DEFAULTS[1].keys},coreId:'ark',buffIds:['dual_apple','molt']},
     {active:false,name:'Player 3',color:'#ffd700',controls:'uhjk',  keys:{...PLAYER_DEFAULTS[2].keys},coreId:'gun',     buffIds:['length_speed','echo_growth']},
   ],
   mode:'classic',
@@ -523,7 +548,10 @@ function stopBgAnimation(){if(bgAnimId){cancelAnimationFrame(bgAnimId);bgAnimId=
 // ════════════════════════════════════════════════════════
 // BUFF HELPER
 // ════════════════════════════════════════════════════════
-function hasBuff(p, id){ return gameState&&gameState.mode==='rpg'&&p.buffIds&&p.buffIds.includes(id); }
+function boostsSuppressed(p){ return Date.now() < (p._boostsDisabledUntil||0); }
+function hasBuff(p, id){
+  return gameState&&gameState.mode==='rpg'&&p.buffIds&&p.buffIds.includes(id)&&!boostsSuppressed(p);
+}
  
 // ════════════════════════════════════════════════════════
 // INPUT HELPERS (ported from single-player)
@@ -808,6 +836,7 @@ function startGame(){
       phaseTimeout:null,phaseCDTimer:null,_phaseCDEnd:0,
       insuranceUsed:false,rpg,
       _noWallUntil:0,_cannibalismUntil:0,_goldApples:0,_echoBonus:0,_dualApple:0,
+      _arkSlowUntil:0,_boostsDisabledUntil:0,
       tickAccum:0,respawnTimer:0,deathCount:0,
       // RPG core state (null in non-rpg modes)
       core: isRpg ? makeCoreSt(lp.coreId) : null,
@@ -818,6 +847,7 @@ function startGame(){
       _lengthMilestone: 0,      // for Growth Bonus: last milestone length
       _quickTurnLast: null,     // for Quick Turn: {dx,dy,time} of last direction press
       gunCDUntil: 0,
+      arkCDUntil: 0,
     };
   });
  
@@ -929,6 +959,52 @@ function gunTier(p){ return coreIs(p,'gun') ? p.core.tier : -1; }
 function gunPierces(p){ return gunTier(p)>=1; }
 function gunRearShot(p){ return gunTier(p)>=2; }
 function gunCanBrick(p){ return gunTier(p)>=3; }
+function hasArkCore(p){ return coreAtLeast(p,'ark',0); }
+function arkTier(p){ return coreIs(p,'ark') ? p.core.tier : -1; }
+function arkChains(p){ return arkTier(p)>=1; }
+function arkOvercharge(p){ return arkTier(p)>=2; }
+function arkBurst(p){ return arkTier(p)>=3; }
+
+function manhattanDistance(a,b){ return Math.abs(a.x-b.x)+Math.abs(a.y-b.y); }
+
+function triggerArkPulse(p){
+  if(!hasArkCore(p)) return;
+  const now=Date.now();
+  const def=CORE_DEFS.ark;
+  const range=arkOvercharge(p)?def.rangeOvercharge:def.range;
+  const cd=arkOvercharge(p)?def.cooldownMsOvercharge:def.cooldownMs;
+  if(now<(p.arkCDUntil||0)) return;
+  const src=p.body[0];
+  if(!src) return;
+  const enemies=gameState.players
+    .filter(o=>o.id!==p.id&&o.alive&&o.body&&o.body[0])
+    .map(o=>({p:o,d:manhattanDistance(src,o.body[0])}))
+    .filter(x=>x.d<=range)
+    .sort((a,b)=>a.d-b.d);
+  if(!enemies.length){
+    showCarnivalToast(`${p.name}: Ark missed`,'#6ef5ff');
+    p.arkCDUntil=now+Math.floor(cd*0.5);
+    return;
+  }
+  const hitList=arkChains(p)?enemies.map(x=>x.p):[enemies[0].p];
+  hitList.forEach(enemy=>{
+    enemy._arkSlowUntil=Math.max(enemy._arkSlowUntil||0,now+ARK_SLOW_MS);
+  });
+  if(arkBurst(p)){
+    const br=def.burstRadius;
+    hitList.forEach(enemy=>{
+      if(manhattanDistance(src,enemy.body[0])<=br){
+        enemy._boostsDisabledUntil=Math.max(enemy._boostsDisabledUntil||0,now+ARK_DISABLE_MS);
+      }
+    });
+    gameState.brickWalls=(gameState.brickWalls||[]).filter(w=>{
+      if(w.ownerId===p.id) return true;
+      return manhattanDistance(src,{x:w.x,y:w.y})>br;
+    });
+  }
+  p.arkCDUntil=now+cd;
+  showCarnivalToast(`${p.name}: Ark pulse x${hitList.length}`,'#6ef5ff');
+}
  
 // ════════════════════════════════════════════════════════
 // GAME LOOP
@@ -979,7 +1055,8 @@ function movePlayer(p){
   if(!p.phaseActive){
     const now=Date.now();
     const inSlow=gameState.slowZones.some(z=>z.until>now&&z.ownerId!==p.id&&Math.abs(p.body[0].x-z.x)<=z.r&&Math.abs(p.body[0].y-z.y)<=z.r);
-    if(inSlow){
+    const arkSlowed=now<(p._arkSlowUntil||0);
+    if(inSlow||arkSlowed){
       // Only move at 60% speed: re-queue the tick (skip every other move)
       p._slowSkip=(p._slowSkip||0)+1;
       if(p._slowSkip%5<3) return; // skip 2 out of 5 ticks → ~60% speed
@@ -995,7 +1072,7 @@ function movePlayer(p){
     if(brickHit){killPlayer(p,brickHit.ownerId);return;}
   }
  
-  const hasNoWall=(rpg&&rpg.noWall)||(Date.now()<(p._noWallUntil||0));
+  const hasNoWall=((rpg&&rpg.noWall)||(Date.now()<(p._noWallUntil||0)))&&!boostsSuppressed(p);
   const wrap=rules.wallWrap||hasNoWall;
   if(wrap){head.x=(head.x+gridW)%gridW;head.y=(head.y+gridH)%gridH;}
   else{
@@ -1324,6 +1401,7 @@ function respawnPlayer(p){
   const{gridW,gridH}=gameState;const spot=randomEmptySpot(gameState.players,gameState.apples,gridW,gridH);if(!spot)return;
   const rdx=Math.random()<.5?1:-1;const sz=p.rpg?p.rpg.startSz:3;
   p.body=buildSpawnBody(spot.x,spot.y,rdx,Math.max(3,sz));p.dx=rdx;p.dy=0;p.alive=true;p.ghost=true;p.growCount=0;p.inputQueue=[];p.insuranceUsed=false;
+  p._arkSlowUntil=0;p._boostsDisabledUntil=0;
   if(p.core && coreIs(p,'phase')){ p.phaseCharges = hasDualPhase(p)?2:1; p.phaseCD=false; clearTimeout(p.phaseCDTimer); p._phaseCDEnd=0; }
   setTimeout(()=>{if(p)p.ghost=false;},2000);
 }
@@ -1369,12 +1447,19 @@ function updateHUD(){
     else if(hasCorePhase(p)&&p.phaseCharges>0)parts.push(`⚡×${p.phaseCharges}`);
     if(p.ghost&&!p.phaseActive)parts.push('GHOST');
     if(Date.now()<(p._noWallUntil||0))parts.push('NOWALL');
+    if(Date.now()<(p._arkSlowUntil||0))parts.push('ARK SLOWED');
+    if(boostsSuppressed(p))parts.push('BOOSTS OFF');
     if(p._goldApples>0)parts.push(`GOLD×${p._goldApples}`);
     if(p.rpg&&p.rpg.soulInsurance&&!p.insuranceUsed)parts.push('INS✓');
     if(hasGunCore(p)){
       const gr=Math.max(0,Math.ceil((p.gunCDUntil-Date.now())/1000));
       if(gr>0) parts.push(`🔫CD ${gr}s`);
       else parts.push('🔫READY');
+    }
+    if(hasArkCore(p)){
+      const ar=Math.max(0,Math.ceil((p.arkCDUntil-Date.now())/1000));
+      if(ar>0) parts.push(`🌀CD ${ar}s`);
+      else parts.push('🌀READY');
     }
     ste.textContent=parts.join(' · ');
  
@@ -1576,6 +1661,9 @@ window.addEventListener('keydown',e=>{
       e.preventDefault();
     } else if(p.core.id==='gun'){
       triggerGunShot(p);
+      e.preventDefault();
+    } else if(p.core.id==='ark'){
+      triggerArkPulse(p);
       e.preventDefault();
     }
   });
