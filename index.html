@@ -211,6 +211,7 @@ body{background:var(--dark);color:#fff;font-family:'Segoe UI',sans-serif;min-hei
       <div class="rule-row"><span>Wall wrapping</span><div class="toggle-group"><button class="tog on" id="wall-on" onclick="setRule('wallWrap',true)">ON</button><button class="tog" id="wall-off" onclick="setRule('wallWrap',false)">OFF</button></div></div>
       <div class="rule-row"><span>Head-on → both die</span><div class="toggle-group"><button class="tog on" id="headon-on" onclick="setRule('headOn',true)">ON</button><button class="tog" id="headon-off" onclick="setRule('headOn',false)">OFF</button></div></div>
       <div class="rule-row"><span>Self-collision</span><div class="toggle-group"><button class="tog on" id="self-on" onclick="setRule('selfCollide',true)">ON</button><button class="tog" id="self-off" onclick="setRule('selfCollide',false)">OFF</button></div></div>
+      <div class="rule-row"><span>Dash chain mode</span><div class="toggle-group"><button class="tog on" id="dash-chain" onclick="setDashChainMode('chain')">CHAIN</button><button class="tog" id="dash-sbud" onclick="setDashChainMode('sbud')">SBUD</button></div></div>
     </div>
   </div>
  
@@ -304,6 +305,13 @@ const ARK_SLOW_MS           = 4000;   // slow zone duration
 const ARK_BURST_SUPPRESS_MS = 3000;   // core suppression duration (tier 3)
 const ARK_CHAIN_TILES       = 5;      // chain reaches enemies this many tiles beyond field edge (tier 1)
 const ARK_BURST_WALL_RADIUS = 2;      // wall-destruction radius on Ark Burst (tier 3)
+const DASH_BASE_DISTANCE    = 3;
+const DASH_BASE_CD_MS       = 2500;
+const DASH_OVER_BONUS_DIST  = 2;
+const DASH_OVER_CD_PENALTY  = 700;
+const DASH_CHAIN_WINDOW_MS  = 1600;
+const DASH_SBUD_WINDOW_MS   = 2000;
+const DASH_ARK_RADIUS       = 1;
  
 // ════════════════════════════════════════════════════════
 // PHASE TIMINGS
@@ -404,6 +412,25 @@ const CORE_DEFS = {
     xpPerApple:   4,
     xpPerKill:    40,
   },
+
+  dash: {
+    id:    'dash',
+    label: 'Dash Core',
+    color: '#00e5ff',
+    tiers: [
+      { name:'Dash',
+        desc:'Dash forward instantly.' },
+      { name:'Chain Dash',
+        desc:'Gameplay menu decides mode: Chain Dash (2 dashes, reduced second) or SBUD Chain Dash (many diminishing dashes).' },
+      { name:'Overdash',
+        desc:'Dash distance increases. Cooldown is slightly longer.' },
+      { name:'Dash Ark',
+        desc:'Dash end emits a small Ark pulse (r=1) that slows enemies briefly.' },
+    ],
+    xpThresholds: [231, 371, 591],
+    xpPerApple:   4,
+    xpPerKill:    40,
+  },
 };
  
 // ════════════════════════════════════════════════════════
@@ -498,6 +525,7 @@ let lobbyState={
   mode:'classic',
   winCondition:'longest',
   winLimit:120,
+  dashChainMode:'chain',
   rules:{respawn:true,wallWrap:true,headOn:true,selfCollide:true},
   sharedRpg:null,
 };
@@ -754,6 +782,11 @@ function setRule(key,val){
   document.getElementById(`${prefix}-on`).classList.toggle('on',val);
   document.getElementById(`${prefix}-off`).classList.toggle('on',!val);
 }
+function setDashChainMode(mode){
+  lobbyState.dashChainMode=mode==='sbud'?'sbud':'chain';
+  document.getElementById('dash-chain')?.classList.toggle('on',lobbyState.dashChainMode==='chain');
+  document.getElementById('dash-sbud')?.classList.toggle('on',lobbyState.dashChainMode==='sbud');
+}
 function validateStart(){document.getElementById('start-btn').disabled=lobbyState.players.filter(p=>p.active).length<1;}
 function updateControlsHint(){const el=document.getElementById('controls-hint');if(el)el.textContent=lobbyState.players.filter(p=>p.active).map(p=>`${p.name}: ${p.keys.up}/${p.keys.left}/${p.keys.down}/${p.keys.right}`).join('   ·   ');}
  
@@ -849,6 +882,9 @@ function startGame(){
       _quickTurnLast: null,     // for Quick Turn: {dx,dy,time} of last direction press
       gunCDUntil: 0,
       arkCDUntil: 0,
+      dashCDUntil: 0,
+      dashChainCount: 0,
+      dashWindowUntil: 0,
       _coreSuppressedUntil: 0,
     };
   });
@@ -868,6 +904,7 @@ function startGame(){
     bullets:[],
     arkBurstFlashes:[],
     mode:lobbyState.mode,
+    dashChainMode:lobbyState.dashChainMode,
     winCondition:lobbyState.winCondition,
     winLimit:lobbyState.winLimit||120,
     rules:{...lobbyState.rules},
@@ -966,6 +1003,8 @@ function gunCanBrick(p){ return gunTier(p)>=3; }
 // Ark Core helpers
 function hasArkCore(p){ return coreAtLeast(p,'ark',0); }
 function arkTier(p){ return coreIs(p,'ark') ? p.core.tier : -1; }
+function hasDashCore(p){ return coreAtLeast(p,'dash',0); }
+function dashTier(p){ return coreIs(p,'dash') ? p.core.tier : -1; }
 
 function triggerArkPulse(p){
   if(!hasArkCore(p)) return;
@@ -1012,6 +1051,98 @@ function triggerArkPulse(p){
   p.arkCDUntil=now+cdMs;
 }
  
+
+function resolveDashHead(p, head){
+  const{gridW,gridH,rules}=gameState;
+  const hasNoWall=(Date.now()<(p._noWallUntil||0));
+  const wrap=rules.wallWrap||hasNoWall;
+  if(wrap){
+    head.x=(head.x+gridW)%gridW;
+    head.y=(head.y+gridH)%gridH;
+    return true;
+  }
+  if(head.x<0||head.x>=gridW||head.y<0||head.y>=gridH){
+    killPlayer(p,null);
+    return false;
+  }
+  return true;
+}
+
+function dashArkPulse(p, head){
+  const now=Date.now();
+  gameState.slowZones.push({x:head.x,y:head.y,r:DASH_ARK_RADIUS,until:now+1800,ownerId:p.id,color:CORE_DEFS.ark.color});
+}
+
+function dashStep(p){
+  const now=Date.now();
+  const head={x:p.body[0].x+p.dx,y:p.body[0].y+p.dy};
+  if(!resolveDashHead(p,head)) return false;
+  const brickHit=gameState.brickWalls.find(b=>b.until>now&&b.ownerId!==p.id&&b.x===head.x&&b.y===head.y);
+  if(brickHit){killPlayer(p,brickHit.ownerId);return false;}
+  if(gameState.rules.selfCollide&&!p.ghost&&!p.phaseActive&&p.body.some(s=>s.x===head.x&&s.y===head.y)){
+    killPlayer(p,null);return false;
+  }
+  for(const other of gameState.players){
+    if(other===p||!other.alive) continue;
+    if(other.body.some(seg=>seg.x===head.x&&seg.y===head.y)){killPlayer(p,other.id);return false;}
+  }
+  p.body.unshift(head);
+  let ate=false;
+  gameState.apples=gameState.apples.filter(a=>{
+    if(a.x===head.x&&a.y===head.y){collectApple(p,a);ate=true;return false;}
+    return true;
+  });
+  if(!ate){if(p.growCount>0)p.growCount--;else p.body.pop();}
+  return true;
+}
+
+function triggerDash(p){
+  if(!hasDashCore(p)) return;
+  const now=Date.now();
+  if(now<p.dashCDUntil) return;
+  const tier=dashTier(p);
+  const baseDist=DASH_BASE_DISTANCE+(tier>=2?DASH_OVER_BONUS_DIST:0);
+  const baseCd=DASH_BASE_CD_MS+(tier>=2?DASH_OVER_CD_PENALTY:0);
+  const mode=gameState.dashChainMode||'chain';
+  let dashScale=1;
+  if(tier>=1){
+    if(mode==='chain'){
+      if(p.dashChainCount===1 && now<=p.dashWindowUntil){
+        dashScale=0.6;
+        p.dashChainCount=0;
+        p.dashWindowUntil=0;
+        p.dashCDUntil=now+baseCd;
+      }else{
+        dashScale=1;
+        p.dashChainCount=1;
+        p.dashWindowUntil=now+DASH_CHAIN_WINDOW_MS;
+      }
+    }else{
+      const scales=[0.8,0.5,0.3,0.15,0.1];
+      const idx=Math.max(0,Math.min(scales.length-1,p.dashChainCount));
+      dashScale=scales[idx];
+      p.dashChainCount++;
+      p.dashWindowUntil=now+DASH_SBUD_WINDOW_MS;
+      if(dashScale<=0.15){
+        p.speed=Math.min(240,p.speed+15);
+        setTimeout(()=>{if(p)p.speed=Math.max(BASE_SPEED,p.speed-15);},2200);
+      }
+    }
+  }else{
+    p.dashCDUntil=now+baseCd;
+  }
+  const steps=Math.max(1,Math.round(baseDist*dashScale));
+  for(let i=0;i<steps;i++){
+    if(!dashStep(p)) break;
+  }
+  if(tier>=3&&p.alive&&p.body.length){
+    dashArkPulse(p,p.body[0]);
+  }
+  if(tier<1||(mode==='chain'&&p.dashChainCount===0)){
+    p.dashCDUntil=Date.now()+baseCd;
+  }
+}
+
 // ════════════════════════════════════════════════════════
 // GAME LOOP
 // ════════════════════════════════════════════════════════
@@ -1022,6 +1153,13 @@ function gameTick(now){
   const dt=Math.min(now-gameState.lastTime,200);gameState.lastTime=now;
  
   gameState.players.forEach(p=>{
+    if(hasDashCore(p) && p.dashChainCount>0 && Date.now()>p.dashWindowUntil){
+      const dTier=dashTier(p);
+      const dCd=DASH_BASE_CD_MS+(dTier>=2?DASH_OVER_CD_PENALTY:0);
+      p.dashCDUntil=Math.max(p.dashCDUntil,Date.now()+dCd);
+      p.dashChainCount=0;
+      p.dashWindowUntil=0;
+    }
     if(!p.alive){
       if(p.respawnTimer>0){p.respawnTimer-=dt;if(p.respawnTimer<=0&&gameState.rules.respawn)respawnPlayer(p);}
       return;
@@ -1408,6 +1546,7 @@ function respawnPlayer(p){
   p.body=buildSpawnBody(spot.x,spot.y,rdx,Math.max(3,sz));p.dx=rdx;p.dy=0;p.alive=true;p.ghost=true;p.growCount=0;p.inputQueue=[];p.insuranceUsed=false;
   if(p.core && coreIs(p,'phase')){ p.phaseCharges = hasDualPhase(p)?2:1; p.phaseCD=false; clearTimeout(p.phaseCDTimer); p._phaseCDEnd=0; }
   if(p.core && coreIs(p,'ark')){ p.arkCDUntil=0; p._coreSuppressedUntil=0; }
+  if(p.core && coreIs(p,'dash')){ p.dashCDUntil=0; p.dashChainCount=0; p.dashWindowUntil=0; }
   setTimeout(()=>{if(p)p.ghost=false;},2000);
 }
  
@@ -1464,6 +1603,13 @@ function updateHUD(){
       const arCd=Math.max(0,Math.ceil((p.arkCDUntil-arNow)/1000));
       if(arCd>0) parts.push(`⚡ARK CD ${arCd}s`);
       else parts.push('⚡ARK READY');
+    }
+    if(hasDashCore(p)){
+      const dNow=Date.now();
+      const dCd=Math.max(0,Math.ceil((p.dashCDUntil-dNow)/1000));
+      if(dCd>0) parts.push(`➜DASH CD ${dCd}s`);
+      else if(p.dashChainCount>0&&dNow<=p.dashWindowUntil) parts.push(`➜CHAIN ${Math.max(0,((p.dashWindowUntil-dNow)/1000)).toFixed(1)}s`);
+      else parts.push('➜DASH READY');
     }
     if(Date.now()<(p._coreSuppressedUntil||0)){
       const supRem=Math.ceil((p._coreSuppressedUntil-Date.now())/1000);
@@ -1686,6 +1832,9 @@ window.addEventListener('keydown',e=>{
     } else if(p.core.id==='ark'){
       triggerArkPulse(p);
       e.preventDefault();
+    } else if(p.core.id==='dash'){
+      triggerDash(p);
+      e.preventDefault();
     }
   });
   // maxrpg phase (no core object): Space=P1, Shift=P2, Tab=P3
@@ -1710,6 +1859,7 @@ window.addEventListener('resize',()=>{
 // ════════════════════════════════════════════════════════
 buildLobby();
 validateStart();
+setDashChainMode(lobbyState.dashChainMode);
 ['respawn','wallWrap','headOn','selfCollide'].forEach(rule=>{
   const val=lobbyState.rules[rule];
   const prefix=rule==='respawn'?'respawn':rule==='wallWrap'?'wall':rule==='headOn'?'headon':'self';
