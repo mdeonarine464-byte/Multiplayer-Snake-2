@@ -355,6 +355,25 @@ const CORE_DEFS = {
     xpPerKill:    40,
     xpPerShedEat: 16,
   },
+  gun: {
+    id:    'gun',
+    label: 'Gun Core',
+    color: '#8ab4ff',
+    tiers: [
+      { name:'Soul Husk',
+        desc:'Action key fires a soul husk. Hit an enemy snake to steal 1 body segment and gain +1 growth. 3s cooldown.' },
+      { name:'Full Metal Jacket',
+        desc:'Soul husk rounds now pierce through snakes.' },
+      { name:'Rear End Armaments',
+        desc:'Each shot also fires from your tail.' },
+      { name:'Shooting Bricks',
+        desc:'Press action during cooldown to prime brick rounds. Next shot creates brick walls on impact.' },
+    ],
+    xpThresholds: [231, 371, 591],
+    xpPerApple:   4,
+    xpPerKill:    40,
+    cooldownMs:   3000,
+  },
 };
  
 // ════════════════════════════════════════════════════════
@@ -444,7 +463,7 @@ let lobbyState={
   players:[
     {active:true, name:'Player 1',color:'#00fbff',controls:'arrows',keys:{...PLAYER_DEFAULTS[0].keys},coreId:'phase',   buffIds:['echo_growth','gold_apple']},
     {active:false,name:'Player 2',color:'#ff00ff',controls:'wasd',  keys:{...PLAYER_DEFAULTS[1].keys},coreId:'shedding',buffIds:['dual_apple','molt']},
-    {active:false,name:'Player 3',color:'#ffd700',controls:'uhjk',  keys:{...PLAYER_DEFAULTS[2].keys},coreId:'phase',   buffIds:['length_speed','echo_growth']},
+    {active:false,name:'Player 3',color:'#ffd700',controls:'uhjk',  keys:{...PLAYER_DEFAULTS[2].keys},coreId:'gun',     buffIds:['length_speed','echo_growth']},
   ],
   mode:'classic',
   winCondition:'longest',
@@ -798,6 +817,8 @@ function startGame(){
       _moltAppleCount: 0,       // for Molt: counts apples toward 15
       _lengthMilestone: 0,      // for Growth Bonus: last milestone length
       _quickTurnLast: null,     // for Quick Turn: {dx,dy,time} of last direction press
+      gunCDUntil: 0,
+      gunBrickPrimed: false,
     };
   });
  
@@ -813,6 +834,7 @@ function startGame(){
     players,apples,rpgCores:[],
     slowZones:[],
     brickWalls:[],
+    bullets:[],
     mode:lobbyState.mode,
     winCondition:lobbyState.winCondition,
     winLimit:lobbyState.winLimit||120,
@@ -903,6 +925,11 @@ function hasCoreShedding(p){ return coreAtLeast(p,'shedding',0); }
 function hasCannibalism(p){ return coreAtLeast(p,'shedding',1) || (p.rpg&&p.rpg.cannibalism)||(Date.now()<(p._cannibalismUntil||0)); }
 function hasArkShedding(p){ return coreAtLeast(p,'shedding',2); }
 function hasSheddingBricks(p){ return coreAtLeast(p,'shedding',3); }
+function hasGunCore(p){ return coreAtLeast(p,'gun',0); }
+function gunTier(p){ return coreIs(p,'gun') ? p.core.tier : -1; }
+function gunPierces(p){ return gunTier(p)>=1; }
+function gunRearShot(p){ return gunTier(p)>=2; }
+function gunCanBrick(p){ return gunTier(p)>=3; }
  
 // ════════════════════════════════════════════════════════
 // GAME LOOP
@@ -935,6 +962,7 @@ function gameTick(now){
     gameState.players.forEach(p=>{if(p.alive&&p.core)addCoreXP(p,1);});
   }
  
+  updateBullets();
   gameState.tick++;
   checkWinCondition();updateHUD();draw();
 }
@@ -1209,6 +1237,76 @@ function reducePhaseCooldown(p, seconds){
     }, remain);
   }
 }
+
+function getTailDirection(p){
+  if(!p.body||p.body.length<2) return {dx:-p.dx,dy:-p.dy};
+  const tail=p.body[p.body.length-1];
+  const prev=p.body[p.body.length-2];
+  let dx=tail.x-prev.x,dy=tail.y-prev.y;
+  if(Math.abs(dx)+Math.abs(dy)!==1){dx=-p.dx;dy=-p.dy;}
+  return {dx,dy};
+}
+
+function fireGunBullet(p, fromTail=false, brick=false){
+  const origin = fromTail ? p.body[p.body.length-1] : p.body[0];
+  const dir = fromTail ? getTailDirection(p) : {dx:p.dx,dy:p.dy};
+  if(!origin||(!dir.dx&&!dir.dy)) return;
+  gameState.bullets.push({x:origin.x,y:origin.y,dx:dir.dx,dy:dir.dy,ownerId:p.id,pierce:gunPierces(p),brick});
+}
+
+function triggerGunShot(p){
+  if(!hasGunCore(p)) return;
+  const now=Date.now();
+  const cd=CORE_DEFS.gun.cooldownMs;
+  if(now<p.gunCDUntil){
+    if(gunCanBrick(p)){
+      p.gunBrickPrimed=true;
+      showCarnivalToast(`${p.name}: Brick rounds primed`,'#8ab4ff');
+    }
+    return;
+  }
+  const brick=!!p.gunBrickPrimed;
+  fireGunBullet(p,false,brick);
+  if(gunRearShot(p)) fireGunBullet(p,true,brick);
+  p.gunBrickPrimed=false;
+  p.gunCDUntil=now+cd;
+}
+
+function updateBullets(){
+  if(!gameState||!gameState.bullets) return;
+  const now=Date.now();
+  const kept=[];
+  gameState.bullets.forEach(b=>{
+    b.x+=b.dx;b.y+=b.dy;
+    if(gameState.rules.wallWrap){
+      b.x=(b.x+gameState.gridW)%gameState.gridW;
+      b.y=(b.y+gameState.gridH)%gameState.gridH;
+    }else if(b.x<0||b.x>=gameState.gridW||b.y<0||b.y>=gameState.gridH){
+      return;
+    }
+    const wallHit=gameState.brickWalls.find(w=>w.until>now&&w.ownerId!==b.ownerId&&w.x===b.x&&w.y===b.y);
+    if(wallHit) return;
+
+    let consumed=false;
+    for(const enemy of gameState.players){
+      if(enemy.id===b.ownerId||!enemy.alive) continue;
+      const hitIdx=enemy.body.findIndex(seg=>seg.x===b.x&&seg.y===b.y);
+      if(hitIdx===-1) continue;
+      const shooter=gameState.players.find(p=>p.id===b.ownerId);
+      if(!shooter) break;
+      if(b.brick){
+        gameState.brickWalls.push({x:b.x,y:b.y,until:now+SHEDDING_BRICK_MS,ownerId:shooter.id,color:shooter.color});
+      }else{
+        if(enemy.body.length>1) enemy.body.pop();
+        else killPlayer(enemy,shooter.id);
+        shooter.growCount+=1;
+      }
+      if(!b.pierce){consumed=true;break;}
+    }
+    if(!consumed) kept.push(b);
+  });
+  gameState.bullets=kept;
+}
  
 // ════════════════════════════════════════════════════════
 // DEATH & RESPAWN
@@ -1269,6 +1367,12 @@ function updateHUD(){
     if(Date.now()<(p._noWallUntil||0))parts.push('NOWALL');
     if(p._goldApples>0)parts.push(`GOLD×${p._goldApples}`);
     if(p.rpg&&p.rpg.soulInsurance&&!p.insuranceUsed)parts.push('INS✓');
+    if(hasGunCore(p)){
+      const gr=Math.max(0,Math.ceil((p.gunCDUntil-Date.now())/1000));
+      if(gr>0) parts.push(`🔫CD ${gr}s`);
+      else parts.push('🔫READY');
+      if(p.gunBrickPrimed) parts.push('🧱ROUNDS');
+    }
     ste.textContent=parts.join(' · ');
  
     // Core XP bar
@@ -1366,6 +1470,13 @@ function draw(){
   });
   gameState.brickWalls=(gameState.brickWalls||[]).filter(b=>b.until>now);
  
+  // Bullets (Gun Core)
+  (gameState.bullets||[]).forEach(b=>{
+    ctx.fillStyle=b.brick?'#ffd700':'#8ab4ff';ctx.shadowColor=ctx.fillStyle;ctx.shadowBlur=8;
+    ctx.fillRect(b.x*CELL+6,b.y*CELL+6,CELL-12,CELL-12);
+    ctx.shadowBlur=0;
+  });
+
   // Apples (S2 style: +2 offset, size-4, shadowBlur=10)
   apples.forEach(a=>{
     ctx.fillStyle=a.color;ctx.shadowColor=a.color;ctx.shadowBlur=10;
@@ -1456,6 +1567,9 @@ window.addEventListener('keydown',e=>{
     } else if(p.core.id==='shedding'){
       // Manual shed: action key triggers immediate shed of 3 segments
       doShed(p,3);
+      e.preventDefault();
+    } else if(p.core.id==='gun'){
+      triggerGunShot(p);
       e.preventDefault();
     }
   });
