@@ -303,6 +303,8 @@ const PHASE_DURATION_BASE = 5000 + CORE_TIME_BONUS_MS;
 const PHASE_CD_BASE       = 7500 + CORE_TIME_BONUS_MS;
 const SHEDDING_SLOW_ZONE_MS = 3000 + CORE_TIME_BONUS_MS;
 const SHEDDING_BRICK_MS     = 15000 + CORE_TIME_BONUS_MS;
+const GUN_CORE_CD_MS        = 1200;
+const GUN_BRICK_MS          = 8000;
  
 // ════════════════════════════════════════════════════════
 // CORE DEFINITIONS
@@ -354,6 +356,24 @@ const CORE_DEFS = {
     xpPerApple:   4,
     xpPerKill:    40,
     xpPerShedEat: 16,
+  },
+  gun: {
+    id:    'gun',
+    label: 'Gun Core',
+    color: '#ff6b35',
+    tiers: [
+      { name:'Soul Husk',
+        desc:'Action key fires a soul husk. Hit an enemy snake to remove 1 length. Short cooldown.' },
+      { name:'Full Metal Jacket',
+        desc:'Soul husk shots pierce through snakes instead of stopping on first hit.' },
+      { name:'Rear End Armaments',
+        desc:'Firing now also shoots a second husk from your tail.' },
+      { name:'Shooting Bricks',
+        desc:'Press action during cooldown to place a temporary brick at your head.' },
+    ],
+    xpThresholds: [231, 371, 591],
+    xpPerApple:   4,
+    xpPerKill:    40,
   },
 };
  
@@ -798,6 +818,7 @@ function startGame(){
       _moltAppleCount: 0,       // for Molt: counts apples toward 15
       _lengthMilestone: 0,      // for Growth Bonus: last milestone length
       _quickTurnLast: null,     // for Quick Turn: {dx,dy,time} of last direction press
+      gunCooldownUntil: 0,
     };
   });
  
@@ -813,6 +834,7 @@ function startGame(){
     players,apples,rpgCores:[],
     slowZones:[],
     brickWalls:[],
+    projectiles:[],
     mode:lobbyState.mode,
     winCondition:lobbyState.winCondition,
     winLimit:lobbyState.winLimit||120,
@@ -903,6 +925,10 @@ function hasCoreShedding(p){ return coreAtLeast(p,'shedding',0); }
 function hasCannibalism(p){ return coreAtLeast(p,'shedding',1) || (p.rpg&&p.rpg.cannibalism)||(Date.now()<(p._cannibalismUntil||0)); }
 function hasArkShedding(p){ return coreAtLeast(p,'shedding',2); }
 function hasSheddingBricks(p){ return coreAtLeast(p,'shedding',3); }
+function hasGunCore(p){ return coreAtLeast(p,'gun',0); }
+function hasGunPierce(p){ return coreAtLeast(p,'gun',1); }
+function hasRearGun(p){ return coreAtLeast(p,'gun',2); }
+function hasShootingBricks(p){ return coreAtLeast(p,'gun',3); }
  
 // ════════════════════════════════════════════════════════
 // GAME LOOP
@@ -934,7 +960,8 @@ function gameTick(now){
   if(gameState.mode==='rpg'){
     gameState.players.forEach(p=>{if(p.alive&&p.core)addCoreXP(p,1);});
   }
- 
+  updateProjectiles();
+
   gameState.tick++;
   checkWinCondition();updateHUD();draw();
 }
@@ -1086,6 +1113,67 @@ function doShed(p, count){
     gameState.slowZones.push({x:sp.x,y:sp.y,r:2,until:now+SHEDDING_SLOW_ZONE_MS,ownerId:p.id,color:p.color});
   }
 }
+
+function damageSnakeByOne(target){
+  if(!target || !target.alive) return false;
+  if(target.body.length<=3) return false;
+  target.body.pop();
+  return true;
+}
+
+function spawnGunProjectile(owner, x, y, dx, dy){
+  if(!dx && !dy) return;
+  gameState.projectiles.push({
+    ownerId: owner.id,
+    x, y, dx, dy,
+    color: owner.color,
+    pierce: hasGunPierce(owner),
+    until: Date.now()+2500,
+  });
+}
+
+function fireGunCore(p){
+  const now=Date.now();
+  if(!hasGunCore(p)) return;
+  if(now < (p.gunCooldownUntil||0)){
+    if(hasShootingBricks(p)){
+      const h=p.body[0];
+      gameState.brickWalls.push({x:h.x,y:h.y,until:now+GUN_BRICK_MS,ownerId:p.id,color:p.color});
+    }
+    return;
+  }
+  p.gunCooldownUntil = now + GUN_CORE_CD_MS;
+  const head=p.body[0];
+  spawnGunProjectile(p,head.x,head.y,p.dx,p.dy);
+  if(hasRearGun(p) && p.body.length>1){
+    const tail=p.body[p.body.length-1];
+    const preTail=p.body[p.body.length-2];
+    let tdx=tail.x-preTail.x, tdy=tail.y-preTail.y;
+    if(Math.abs(tdx)+Math.abs(tdy)!==1){tdx=-p.dx;tdy=-p.dy;}
+    spawnGunProjectile(p,tail.x,tail.y,tdx,tdy);
+  }
+}
+
+function updateProjectiles(){
+  if(!gameState.projectiles || gameState.projectiles.length===0) return;
+  const now=Date.now();
+  gameState.projectiles = gameState.projectiles.filter(pr=>{
+    if(pr.until<=now) return false;
+    pr.x+=pr.dx; pr.y+=pr.dy;
+    if(pr.x<0||pr.x>=gameState.gridW||pr.y<0||pr.y>=gameState.gridH) return false;
+    const brickHit=(gameState.brickWalls||[]).some(b=>b.until>now&&b.ownerId!==pr.ownerId&&b.x===pr.x&&b.y===pr.y);
+    if(brickHit) return false;
+    let consumed=false;
+    gameState.players.forEach(t=>{
+      if(consumed||!t.alive||t.id===pr.ownerId) return;
+      if(t.body.some(seg=>seg.x===pr.x&&seg.y===pr.y)){
+        damageSnakeByOne(t);
+        if(!pr.pierce) consumed=true;
+      }
+    });
+    return !consumed;
+  });
+}
  
 function collectApple(p,a){
   const rpg=p.rpg;
@@ -1222,6 +1310,7 @@ function respawnPlayer(p){
   const{gridW,gridH}=gameState;const spot=randomEmptySpot(gameState.players,gameState.apples,gridW,gridH);if(!spot)return;
   const rdx=Math.random()<.5?1:-1;const sz=p.rpg?p.rpg.startSz:3;
   p.body=buildSpawnBody(spot.x,spot.y,rdx,Math.max(3,sz));p.dx=rdx;p.dy=0;p.alive=true;p.ghost=true;p.growCount=0;p.inputQueue=[];p.insuranceUsed=false;
+  p.gunCooldownUntil=0;
   if(p.core && coreIs(p,'phase')){ p.phaseCharges = hasDualPhase(p)?2:1; p.phaseCD=false; clearTimeout(p.phaseCDTimer); p._phaseCDEnd=0; }
   setTimeout(()=>{if(p)p.ghost=false;},2000);
 }
@@ -1265,6 +1354,10 @@ function updateHUD(){
     }
     else if(p.phaseCD){const rem=Math.max(0,Math.ceil((p._phaseCDEnd-Date.now())/1000));parts.push(`⚡CD ${rem}s`);}
     else if(hasCorePhase(p)&&p.phaseCharges>0)parts.push(`⚡×${p.phaseCharges}`);
+    if(hasGunCore(p)){
+      const gRem=Math.max(0,Math.ceil(((p.gunCooldownUntil||0)-Date.now())/1000));
+      parts.push(gRem>0?`🔫CD ${gRem}s`:'🔫READY');
+    }
     if(p.ghost&&!p.phaseActive)parts.push('GHOST');
     if(Date.now()<(p._noWallUntil||0))parts.push('NOWALL');
     if(p._goldApples>0)parts.push(`GOLD×${p._goldApples}`);
@@ -1372,6 +1465,15 @@ function draw(){
     ctx.fillRect(a.x*CELL+2,a.y*CELL+2,CELL-4,CELL-4);
     ctx.shadowBlur=0;ctx.shadowColor='transparent';
   });
+
+  // Gun Core projectiles
+  (gameState.projectiles||[]).forEach(pr=>{
+    ctx.fillStyle=pr.color;
+    ctx.shadowColor=pr.color;
+    ctx.shadowBlur=10;
+    ctx.fillRect(pr.x*CELL+6,pr.y*CELL+6,CELL-12,CELL-12);
+    ctx.shadowBlur=0;ctx.shadowColor='transparent';
+  });
  
   // Shed tail pieces (S2 style: rgba purple, + stroke)
   players.forEach(p=>{
@@ -1456,6 +1558,9 @@ window.addEventListener('keydown',e=>{
     } else if(p.core.id==='shedding'){
       // Manual shed: action key triggers immediate shed of 3 segments
       doShed(p,3);
+      e.preventDefault();
+    } else if(p.core.id==='gun'){
+      fireGunCore(p);
       e.preventDefault();
     }
   });
