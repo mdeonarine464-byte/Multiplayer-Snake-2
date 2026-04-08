@@ -304,6 +304,18 @@ const ARK_SLOW_MS           = 4000;   // slow zone duration
 const ARK_BURST_SUPPRESS_MS = 3000;   // core suppression duration (tier 3)
 const ARK_CHAIN_TILES       = 5;      // chain reaches enemies this many tiles beyond field edge (tier 1)
 const ARK_BURST_WALL_RADIUS = 2;      // wall-destruction radius on Ark Burst (tier 3)
+
+// ════════════════════════════════════════════════════════
+// DASH CORE CONSTANTS
+// ════════════════════════════════════════════════════════
+const DASH_CD_MS                 = 4500;
+const DASH_OVERDASH_CD_MS        = 5600;  // slightly longer CD
+const DASH_BASE_TILES            = 4;
+const DASH_OVERDASH_BONUS_TILES  = 2;
+const DASH_CHAIN_WINDOW_MS       = 1500;
+const DASH_CHAIN_SECOND_MULT     = 0.55;  // regular chain dash second hit (strong)
+const DASH_SBUD_DECAY_MULT       = 0.40;  // 3 dashes ~= regular chain total distance
+const DASH_SBUD_MIN_MULT         = 0.18;  // "until it becomes a slow"
  
 // ════════════════════════════════════════════════════════
 // PHASE TIMINGS
@@ -399,6 +411,24 @@ const CORE_DEFS = {
         desc:'Field radius grows to 5. Cooldown shortened to 5s.' },
       { name:'Ark Burst',
         desc:'Also disables enemy cores for 3s and destroys enemy walls within r=2 of your head, while keeping the full slow field.' },
+    ],
+    xpThresholds: [231, 371, 591],
+    xpPerApple:   4,
+    xpPerKill:    40,
+  },
+  dash: {
+    id:    'dash',
+    label: 'Dash Core',
+    color: '#00d2ff',
+    tiers: [
+      { name:'The Speed Snake',
+        desc:'Action key: dash forward instantly.' },
+      { name:'Chain Dash',
+        desc:'Can dash twice consecutively. Second dash has reduced effect.' },
+      { name:'SBUD Chain Dash',
+        desc:'Can dash repeatedly with reduced effect each dash. Needs ~3 dashes to match Chain Dash distance.' },
+      { name:'Overdash Ark',
+        desc:'Dash length increases, cooldown is slightly longer, and dash ends with a small Ark pulse.' },
     ],
     xpThresholds: [231, 371, 591],
     xpPerApple:   4,
@@ -849,6 +879,9 @@ function startGame(){
       _quickTurnLast: null,     // for Quick Turn: {dx,dy,time} of last direction press
       gunCDUntil: 0,
       arkCDUntil: 0,
+      dashCDUntil: 0,
+      dashChainCount: 0,
+      dashChainUntil: 0,
       _coreSuppressedUntil: 0,
     };
   });
@@ -966,6 +999,8 @@ function gunCanBrick(p){ return gunTier(p)>=3; }
 // Ark Core helpers
 function hasArkCore(p){ return coreAtLeast(p,'ark',0); }
 function arkTier(p){ return coreIs(p,'ark') ? p.core.tier : -1; }
+function hasDashCore(p){ return coreAtLeast(p,'dash',0); }
+function dashTier(p){ return coreIs(p,'dash') ? p.core.tier : -1; }
 
 function triggerArkPulse(p){
   if(!hasArkCore(p)) return;
@@ -1010,6 +1045,41 @@ function triggerArkPulse(p){
     showCarnivalToast(`${p.name}: ${chained?`ARK CHAIN (+${chained})`:'ARK PULSE'}`,CORE_DEFS.ark.color);
   }
   p.arkCDUntil=now+cdMs;
+}
+
+function getDashMultiplierForUse(p, now){
+  const tier=dashTier(p);
+  const inChainWindow=now<(p.dashChainUntil||0);
+  const chainCount=inChainWindow?(p.dashChainCount||0):0;
+  if(tier===1){
+    return chainCount===1 ? DASH_CHAIN_SECOND_MULT : 1;
+  }
+  if(tier>=2){
+    return Math.max(DASH_SBUD_MIN_MULT, Math.pow(DASH_SBUD_DECAY_MULT, chainCount));
+  }
+  return 1;
+}
+
+function triggerDashCore(p){
+  if(!hasDashCore(p)||!p.alive) return;
+  const now=Date.now();
+  if(now<p.dashCDUntil) return;
+  const tier=dashTier(p);
+  if(now>=(p.dashChainUntil||0)) p.dashChainCount=0;
+  const mult=getDashMultiplierForUse(p,now);
+  const overdash=tier>=3;
+  const baseTiles=overdash?(DASH_BASE_TILES+DASH_OVERDASH_BONUS_TILES):DASH_BASE_TILES;
+  const steps=Math.max(1,Math.round(baseTiles*mult));
+  p._isDashing=true;
+  for(let i=0;i<steps&&p.alive;i++) movePlayer(p);
+  p._isDashing=false;
+  p.dashChainCount=(p.dashChainCount||0)+1;
+  p.dashChainUntil=now+DASH_CHAIN_WINDOW_MS;
+  const cd=overdash?DASH_OVERDASH_CD_MS:DASH_CD_MS;
+  p.dashCDUntil=now+cd;
+  if(overdash){
+    gameState.slowZones.push({x:p.body[0].x,y:p.body[0].y,r:1,until:now+1400,ownerId:p.id,color:CORE_DEFS.dash.color});
+  }
 }
  
 // ════════════════════════════════════════════════════════
@@ -1058,7 +1128,7 @@ function movePlayer(p){
  
   // Slow zone: if player's head is in a slow zone that they don't own, halve their tick rate
   // (implemented as: skip this move tick if accumulated time < 2× speed)
-  if(!p.phaseActive){
+  if(!p.phaseActive&&!p._isDashing){
     const now=Date.now();
     const inSlow=gameState.slowZones.some(z=>z.until>now&&z.ownerId!==p.id&&Math.abs(p.body[0].x-z.x)<=z.r&&Math.abs(p.body[0].y-z.y)<=z.r);
     if(inSlow){
@@ -1408,6 +1478,7 @@ function respawnPlayer(p){
   p.body=buildSpawnBody(spot.x,spot.y,rdx,Math.max(3,sz));p.dx=rdx;p.dy=0;p.alive=true;p.ghost=true;p.growCount=0;p.inputQueue=[];p.insuranceUsed=false;
   if(p.core && coreIs(p,'phase')){ p.phaseCharges = hasDualPhase(p)?2:1; p.phaseCD=false; clearTimeout(p.phaseCDTimer); p._phaseCDEnd=0; }
   if(p.core && coreIs(p,'ark')){ p.arkCDUntil=0; p._coreSuppressedUntil=0; }
+  if(p.core && coreIs(p,'dash')){ p.dashCDUntil=0; p.dashChainCount=0; p.dashChainUntil=0; }
   setTimeout(()=>{if(p)p.ghost=false;},2000);
 }
  
@@ -1464,6 +1535,16 @@ function updateHUD(){
       const arCd=Math.max(0,Math.ceil((p.arkCDUntil-arNow)/1000));
       if(arCd>0) parts.push(`⚡ARK CD ${arCd}s`);
       else parts.push('⚡ARK READY');
+    }
+    if(hasDashCore(p)){
+      const dNow=Date.now();
+      const dCd=Math.max(0,Math.ceil((p.dashCDUntil-dNow)/1000));
+      if(dCd>0) parts.push(`💨CD ${dCd}s`);
+      else {
+        const chainLive=dNow<(p.dashChainUntil||0) ? (p.dashChainCount||0) : 0;
+        if(chainLive>0) parts.push(`💨CHAIN ${chainLive}`);
+        else parts.push('💨READY');
+      }
     }
     if(Date.now()<(p._coreSuppressedUntil||0)){
       const supRem=Math.ceil((p._coreSuppressedUntil-Date.now())/1000);
@@ -1685,6 +1766,9 @@ window.addEventListener('keydown',e=>{
       e.preventDefault();
     } else if(p.core.id==='ark'){
       triggerArkPulse(p);
+      e.preventDefault();
+    } else if(p.core.id==='dash'){
+      triggerDashCore(p);
       e.preventDefault();
     }
   });
