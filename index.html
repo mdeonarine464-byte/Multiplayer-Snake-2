@@ -427,13 +427,13 @@ const CORE_DEFS = {
     label: 'Dash Core',
     color: '#00d2ff',
     tiers: [
-      { name:'The Speed Snake',
+      { name:'Dash',
         desc:'Action key: dash forward instantly.' },
-      { name:'Chain Core',
+      { name:'Chain Dash',
         desc:'Unlock chain style: pick Chain Dash or SBUD Chain Dash in core selection.' },
-      { name:'Chain Mastery',
+      { name:'OverDash',
         desc:'Improves your selected chain style. Chain Dash is stronger burst; SBUD scales with repeated casts.' },
-      { name:'Overdash Ark',
+      { name:'Dash Ark',
         desc:'Dash length increases, cooldown is slightly longer, and dash ends with a small Ark pulse.' },
     ],
     xpThresholds: [231, 371, 591],
@@ -718,7 +718,7 @@ function buildCorePanel(){
           <small>Dash twice consecutively. Second dash reduced, but strongest short burst.</small>
         </button>
         <button class="dash-chain-choice ${lp.dashChainStyle==='sbud'?'selected':''}" onclick="setDashChainStyle(${idx},'sbud')">
-          SBUD Chain Dash
+          Super Better Uper Duper Chain Dash 
           <small>Consecutive dashes decay each use. Around 3 dashes match regular Chain Dash distance.</small>
         </button>
       </div>
