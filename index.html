@@ -1126,6 +1126,7 @@ function updateSplitSummons(p){
   p.pathHistory.unshift({x:head.x,y:head.y});
   if(p.pathHistory.length>420) p.pathHistory.length=420;
   const sideCodes=[-1,1,-2,2,-3,3];
+  const occupied=new Set(p.body.map(seg=>`${seg.x},${seg.y}`));
   (p.splitSummons||[]).forEach((s,idx)=>{
     if(!s.alive) return;
     if(s.type==='phantom') s.len=Math.max(3,p.body.length);
@@ -1141,9 +1142,18 @@ function updateSplitSummons(p){
       // Left perpendicular for sign < 0, right perpendicular for sign > 0
       const perX=sideSign<0 ? -dirY : dirY;
       const perY=sideSign<0 ?  dirX : -dirX;
-      const sx=(base.x + perX*laneDistance + gameState.gridW)%gameState.gridW;
-      const sy=(base.y + perY*laneDistance + gameState.gridH)%gameState.gridH;
+      let sx=(base.x + perX*laneDistance + gameState.gridW)%gameState.gridW;
+      let sy=(base.y + perY*laneDistance + gameState.gridH)%gameState.gridH;
+      // Avoid split snakes visually "running into" each other (or the owner body) on tight turns.
+      // If a lane cell is already occupied, push this segment farther out on the same side.
+      let attempt=0;
+      while(occupied.has(`${sx},${sy}`) && attempt<6){
+        attempt++;
+        sx=(base.x + perX*(laneDistance+attempt) + gameState.gridW)%gameState.gridW;
+        sy=(base.y + perY*(laneDistance+attempt) + gameState.gridH)%gameState.gridH;
+      }
       nextBody.push({x:sx,y:sy});
+      occupied.add(`${sx},${sy}`);
     }
     s.body=nextBody;
   });
