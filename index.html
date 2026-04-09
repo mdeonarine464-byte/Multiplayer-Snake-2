@@ -1111,7 +1111,10 @@ function spawnSplitSummon(p){
 
 function recallHiveSummons(p){
   if(!hasHiveCore(p)||!p.splitSummons||p.splitSummons.length===0) return;
-  const bonus=Math.floor(p.splitSummons.reduce((sum,s)=>sum+s.body.length,0)/2);
+  const totalLen=p.splitSummons.reduce((sum,s)=>sum+s.body.length,0);
+  const bonus = splitTier(p)>=3
+    ? totalLen // Cell Division: recall always returns full growth value
+    : Math.max(p.splitSummons.length, Math.floor(totalLen/2));
   p.growCount+=Math.max(0,bonus);
   p.splitSummons=[];
 }
@@ -1129,10 +1132,11 @@ function updateSplitSummons(p){
     const sideCode=sideCodes[idx]||((idx%2===0?-1:1)*(Math.floor(idx/2)+1));
     const sideSign=Math.sign(sideCode)||1;
     const laneDistance=Math.abs(sideCode)*2; // one empty tile between main and side snake
+    const lag=Math.max(0,Math.floor((s.offset||0)/3)); // avoid always matching main-head row
     const nextBody=[];
     for(let i=0;i<s.len;i++){
-      const base=p.body[Math.min(i,p.body.length-1)]||head;
-      const next=p.body[Math.min(i+1,p.body.length-1)]||base;
+      const base=p.body[Math.min(i+lag,p.body.length-1)]||head;
+      const next=p.body[Math.min(i+lag+1,p.body.length-1)]||base;
       let dirX=base.x-next.x,dirY=base.y-next.y;
       if(Math.abs(dirX)+Math.abs(dirY)!==1){dirX=p.dx;dirY=p.dy;}
       // Left perpendicular for sign < 0, right perpendicular for sign > 0
