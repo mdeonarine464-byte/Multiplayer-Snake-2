@@ -1126,26 +1126,42 @@ function updateSplitSummons(p){
   p.pathHistory.unshift({x:head.x,y:head.y});
   if(p.pathHistory.length>420) p.pathHistory.length=420;
   const sideCodes=[-1,1,-2,2,-3,3];
+  const usedCells=new Set(p.body.map(seg=>`${seg.x},${seg.y}`));
   (p.splitSummons||[]).forEach((s,idx)=>{
     if(!s.alive) return;
     if(s.type==='phantom') s.len=Math.max(3,p.body.length);
     const sideCode=sideCodes[idx]||((idx%2===0?-1:1)*(Math.floor(idx/2)+1));
     const sideSign=Math.sign(sideCode)||1;
-    const laneDistance=Math.abs(sideCode)*2; // one empty tile between main and side snake
-    const nextBody=[];
-    for(let i=0;i<s.len;i++){
-      const base=p.body[Math.min(i,p.body.length-1)]||head;
-      const next=p.body[Math.min(i+1,p.body.length-1)]||base;
-      let dirX=base.x-next.x,dirY=base.y-next.y;
-      if(Math.abs(dirX)+Math.abs(dirY)!==1){dirX=p.dx;dirY=p.dy;}
-      // Left perpendicular for sign < 0, right perpendicular for sign > 0
-      const perX=sideSign<0 ? -dirY : dirY;
-      const perY=sideSign<0 ?  dirX : -dirX;
-      const sx=(base.x + perX*laneDistance + gameState.gridW)%gameState.gridW;
-      const sy=(base.y + perY*laneDistance + gameState.gridH)%gameState.gridH;
-      nextBody.push({x:sx,y:sy});
+    const baseLane=Math.abs(sideCode)*2; // one empty tile between main and side snake
+    let chosenBody=[];
+
+    for(let laneStep=0;laneStep<6;laneStep++){
+      const laneDistance=baseLane+laneStep;
+      const trialBody=[];
+      let overlaps=false;
+      for(let i=0;i<s.len;i++){
+        const base=p.body[Math.min(i,p.body.length-1)]||head;
+        const next=p.body[Math.min(i+1,p.body.length-1)]||base;
+        let dirX=base.x-next.x,dirY=base.y-next.y;
+        if(Math.abs(dirX)+Math.abs(dirY)!==1){dirX=p.dx;dirY=p.dy;}
+        // Left perpendicular for sign < 0, right perpendicular for sign > 0
+        const perX=sideSign<0 ? -dirY : dirY;
+        const perY=sideSign<0 ?  dirX : -dirX;
+        const sx=(base.x + perX*laneDistance + gameState.gridW)%gameState.gridW;
+        const sy=(base.y + perY*laneDistance + gameState.gridH)%gameState.gridH;
+        const key=`${sx},${sy}`;
+        if(usedCells.has(key)){overlaps=true;break;}
+        trialBody.push({x:sx,y:sy});
+      }
+      if(!overlaps){chosenBody=trialBody;break;}
     }
-    s.body=nextBody;
+
+    if(chosenBody.length===0){
+      // Fallback: keep last body instead of forcing overlap jitter.
+      chosenBody=(s.body||[]).slice(0,s.len);
+    }
+    s.body=chosenBody;
+    chosenBody.forEach(seg=>usedCells.add(`${seg.x},${seg.y}`));
   });
 }
 
