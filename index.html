@@ -440,6 +440,42 @@ const CORE_DEFS = {
     xpPerApple:   4,
     xpPerKill:    40,
   },
+  phantom: {
+    id:    'phantom',
+    label: 'Phantom Split Core',
+    color: '#7fffd4',
+    tiers: [
+      { name:'Phantom Split',
+        desc:'Action key summons a decoy snake copy that follows your trail.' },
+      { name:'Snake Split I',
+        desc:'Raise max phantom count to 2 (3 total snakes including your main snake).' },
+      { name:'Snake Split II',
+        desc:'Raise max phantom count to 3 (4 total snakes including your main snake).' },
+      { name:'True Phantom',
+        desc:'Phantom heads can collect apples and transfer the rewards to your main snake.' },
+    ],
+    xpThresholds: [231, 371, 591],
+    xpPerApple:   4,
+    xpPerKill:    40,
+  },
+  hive: {
+    id:    'hive',
+    label: 'Hive Split Core',
+    color: '#6eff6e',
+    tiers: [
+      { name:'Hive Split',
+        desc:'Action key creates an active hive snake. Hold action key to recall all hive snakes.' },
+      { name:'Snake Split I',
+        desc:'Raise max hive snakes to 2 (3 total snakes including your main snake).' },
+      { name:'Snake Split II',
+        desc:'Raise max hive snakes to 3 (4 total snakes including your main snake).' },
+      { name:'Cell Division',
+        desc:'Splitting no longer consumes main snake length.' },
+    ],
+    xpThresholds: [231, 371, 591],
+    xpPerApple:   4,
+    xpPerKill:    40,
+  },
 };
  
 // ════════════════════════════════════════════════════════
@@ -910,6 +946,9 @@ function startGame(){
       dashChainUntil: 0,
       dashChainStyle: isRpg ? (lp.dashChainStyle||'chain') : 'chain',
       _coreSuppressedUntil: 0,
+      splitSummons: [],
+      pathHistory: [],
+      _actionHoldStart: 0,
     };
   });
  
@@ -1028,6 +1067,83 @@ function hasArkCore(p){ return coreAtLeast(p,'ark',0); }
 function arkTier(p){ return coreIs(p,'ark') ? p.core.tier : -1; }
 function hasDashCore(p){ return coreAtLeast(p,'dash',0); }
 function dashTier(p){ return coreIs(p,'dash') ? p.core.tier : -1; }
+function hasPhantomCore(p){ return coreAtLeast(p,'phantom',0); }
+function hasHiveCore(p){ return coreAtLeast(p,'hive',0); }
+function splitTier(p){ return (coreIs(p,'phantom')||coreIs(p,'hive')) ? p.core.tier : -1; }
+
+function getSplitMaxSummons(p){
+  const t=splitTier(p);
+  if(t<=0) return 1;
+  if(t===1) return 2;
+  return 3;
+}
+
+function trimBodyKeepMin(p, removeCount){
+  const maxRemove=Math.max(0,p.body.length-3);
+  const actual=Math.min(maxRemove,removeCount);
+  for(let i=0;i<actual;i++) p.body.pop();
+  return actual;
+}
+
+function spawnSplitSummon(p){
+  if(!p.core || (!hasPhantomCore(p)&&!hasHiveCore(p))) return;
+  const maxSummons=getSplitMaxSummons(p);
+  if((p.splitSummons||[]).length>=maxSummons) return;
+  const baseLen=Math.max(3,p.body.length);
+  const isHive=hasHiveCore(p);
+  const noCost=isHive && splitTier(p)>=3;
+  let summonLen=Math.max(3,Math.floor(baseLen/2));
+  if(isHive && !noCost){
+    const removed=trimBodyKeepMin(p,summonLen);
+    if(removed<3) return;
+    summonLen=removed;
+  }
+  const offset=6+(p.splitSummons.length*4);
+  p.splitSummons.push({
+    id:`${p.id}-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
+    type:isHive?'hive':'phantom',
+    len:summonLen,
+    offset,
+    body:p.body.slice(-summonLen).map(s=>({x:s.x,y:s.y})),
+    alive:true,
+  });
+}
+
+function recallHiveSummons(p){
+  if(!hasHiveCore(p)||!p.splitSummons||p.splitSummons.length===0) return;
+  const bonus=Math.floor(p.splitSummons.reduce((sum,s)=>sum+s.body.length,0)/2);
+  p.growCount+=Math.max(0,bonus);
+  p.splitSummons=[];
+}
+
+function updateSplitSummons(p){
+  if(!p.core||!p.alive) return;
+  if(!p.pathHistory) p.pathHistory=[];
+  const head=p.body[0];
+  p.pathHistory.unshift({x:head.x,y:head.y});
+  if(p.pathHistory.length>420) p.pathHistory.length=420;
+  const sideCodes=[-1,1,-2,2,-3,3];
+  (p.splitSummons||[]).forEach((s,idx)=>{
+    if(!s.alive) return;
+    const sideCode=sideCodes[idx]||((idx%2===0?-1:1)*(Math.floor(idx/2)+1));
+    const sideSign=Math.sign(sideCode)||1;
+    const laneDistance=Math.abs(sideCode)*2; // one empty tile between main and side snake
+    const nextBody=[];
+    for(let i=0;i<s.len;i++){
+      const base=p.body[Math.min(i,p.body.length-1)]||head;
+      const next=p.body[Math.min(i+1,p.body.length-1)]||base;
+      let dirX=base.x-next.x,dirY=base.y-next.y;
+      if(Math.abs(dirX)+Math.abs(dirY)!==1){dirX=p.dx;dirY=p.dy;}
+      // Left perpendicular for sign < 0, right perpendicular for sign > 0
+      const perX=sideSign<0 ? -dirY : dirY;
+      const perY=sideSign<0 ?  dirX : -dirX;
+      const sx=(base.x + perX*laneDistance + gameState.gridW)%gameState.gridW;
+      const sy=(base.y + perY*laneDistance + gameState.gridH)%gameState.gridH;
+      nextBody.push({x:sx,y:sy});
+    }
+    s.body=nextBody;
+  });
+}
 
 function triggerArkPulse(p){
   if(!hasArkCore(p)) return;
@@ -1147,6 +1263,22 @@ function gameTick(now){
     }
  
     movePlayer(p);
+    updateSplitSummons(p);
+  });
+
+  // Split snake apple collection
+  gameState.players.forEach(owner=>{
+    if(!owner.alive||!owner.splitSummons||owner.splitSummons.length===0) return;
+    owner.splitSummons.forEach(s=>{
+      if(!s.alive||!s.body||s.body.length===0) return;
+      const sh=s.body[0];
+      gameState.apples=gameState.apples.filter(a=>{
+        if(a.x!==sh.x||a.y!==sh.y) return true;
+        const canTransfer = (s.type==='hive') || (s.type==='phantom' && splitTier(owner)>=3);
+        if(canTransfer) collectApple(owner,a);
+        return false;
+      });
+    });
   });
  
   // Passive core XP over time (all players with a core get a tiny trickle — 1 XP per tick ≈ 7s per 100 XP)
@@ -1230,6 +1362,7 @@ function movePlayer(p){
       if(other===p||!other.alive) continue;
       if(rules.headOn&&other.body[0].x===head.x&&other.body[0].y===head.y){killPlayer(p,other.id);killPlayer(other,p.id);return;}
       if(other.body.slice(1).some(s=>s.x===head.x&&s.y===head.y)){killPlayer(p,other.id);return;}
+      if((other.splitSummons||[]).some(s=>s.body&&s.body.some(seg=>seg.x===head.x&&seg.y===head.y))){killPlayer(p,other.id);return;}
     }
   }
   if(!p.alive) return;
@@ -1517,6 +1650,7 @@ function respawnPlayer(p){
   const{gridW,gridH}=gameState;const spot=randomEmptySpot(gameState.players,gameState.apples,gridW,gridH);if(!spot)return;
   const rdx=Math.random()<.5?1:-1;const sz=p.rpg?p.rpg.startSz:3;
   p.body=buildSpawnBody(spot.x,spot.y,rdx,Math.max(3,sz));p.dx=rdx;p.dy=0;p.alive=true;p.ghost=true;p.growCount=0;p.inputQueue=[];p.insuranceUsed=false;
+  p.splitSummons=[];p.pathHistory=[];
   if(p.core && coreIs(p,'phase')){ p.phaseCharges = hasDualPhase(p)?2:1; p.phaseCD=false; clearTimeout(p.phaseCDTimer); p._phaseCDEnd=0; }
   if(p.core && coreIs(p,'ark')){ p.arkCDUntil=0; p._coreSuppressedUntil=0; }
   if(p.core && coreIs(p,'dash')){ p.dashCDUntil=0; p.dashChainCount=0; p.dashChainUntil=0; }
@@ -1586,6 +1720,12 @@ function updateHUD(){
         if(chainLive>0) parts.push(`💨CHAIN ${chainLive}`);
         else parts.push('💨READY');
       }
+    }
+    if(hasPhantomCore(p)||hasHiveCore(p)){
+      const live=(p.splitSummons||[]).length;
+      const max=getSplitMaxSummons(p);
+      const icon=hasHiveCore(p)?'🧬':'👻';
+      parts.push(`${icon}${live}/${max}`);
     }
     if(Date.now()<(p._coreSuppressedUntil||0)){
       const supRem=Math.ceil((p._coreSuppressedUntil-Date.now())/1000);
@@ -1723,6 +1863,28 @@ function draw(){
       ctx.strokeRect(seg.x*CELL+5,seg.y*CELL+5,CELL-10,CELL-10);
     });
   });
+
+  // Split summons (Phantom/Hive)
+  players.forEach(owner=>{
+    (owner.splitSummons||[]).forEach(s=>{
+      if(!s.alive||!s.body) return;
+      s.body.forEach((seg,i)=>{
+        const isHead=i===0;
+        if(s.type==='hive'){
+          const c=s.type==='hive' ? '#80ff80' : owner.color;
+          ctx.globalAlpha=isHead?0.95:0.7;
+          drawSnakeSegment(seg,isHead,false,c);
+          ctx.strokeStyle='rgba(0,0,0,0.35)';
+          ctx.lineWidth=1;
+          ctx.strokeRect(seg.x*CELL+3,seg.y*CELL+3,CELL-6,CELL-6);
+        } else {
+          ctx.globalAlpha=isHead?0.5:0.28;
+          drawSnakeSegment(seg,isHead,false,owner.color);
+        }
+      });
+      ctx.globalAlpha=1;
+    });
+  });
  
   // Snakes
   players.forEach(p=>{
@@ -1751,7 +1913,10 @@ function draw(){
 // ════════════════════════════════════════════════════════
 function randomEmptySpot(players,apples,gridW,gridH){
   const occ=new Set();
-  players.forEach(p=>{if(p.body)p.body.forEach(s=>occ.add(`${s.x},${s.y}`));});
+  players.forEach(p=>{
+    if(p.body)p.body.forEach(s=>occ.add(`${s.x},${s.y}`));
+    (p.splitSummons||[]).forEach(sp=>{(sp.body||[]).forEach(s=>occ.add(`${s.x},${s.y}`));});
+  });
   apples.forEach(a=>occ.add(`${a.x},${a.y}`));
   (gameState&&gameState.brickWalls||[]).filter(b=>b.until>Date.now()).forEach(b=>occ.add(`${b.x},${b.y}`));
   const cands=[];for(let x=0;x<gridW;x++)for(let y=0;y<gridH;y++)if(!occ.has(`${x},${y}`))cands.push({x,y});
@@ -1789,8 +1954,10 @@ window.addEventListener('keydown',e=>{
   ACTION_KEYS.forEach((ak,slot)=>{
     const matched = e.key===ak || e.key.toLowerCase()===ak.toLowerCase();
     if(!matched) return;
+    if(e.repeat) return;
     const p=gameState.players[slot];
     if(!p||!p.alive||!p.core) return;
+    if(!p._actionHoldStart) p._actionHoldStart=Date.now();
     // Ark Burst core suppression blocks all core activations
     if(Date.now()<(p._coreSuppressedUntil||0)){e.preventDefault();return;}
     if(p.core.id==='phase' && hasCorePhase(p)){
@@ -1809,6 +1976,12 @@ window.addEventListener('keydown',e=>{
     } else if(p.core.id==='dash'){
       triggerDashCore(p);
       e.preventDefault();
+    } else if(p.core.id==='phantom'){
+      spawnSplitSummon(p);
+      e.preventDefault();
+    } else if(p.core.id==='hive'){
+      spawnSplitSummon(p);
+      e.preventDefault();
     }
   });
   // maxrpg phase (no core object): Space=P1, Shift=P2, Tab=P3
@@ -1819,6 +1992,22 @@ window.addEventListener('keydown',e=>{
       if(p&&p.alive&&p.rpg&&p.rpg.hasPhase){triggerPhase(p);e.preventDefault();}
     }
   }
+});
+
+window.addEventListener('keyup',e=>{
+  if(!gameState||gameState.over) return;
+  ACTION_KEYS.forEach((ak,slot)=>{
+    const matched = e.key===ak || e.key.toLowerCase()===ak.toLowerCase();
+    if(!matched) return;
+    const p=gameState.players[slot];
+    if(!p||!p.alive||!p.core) return;
+    const heldFor=Date.now()-(p._actionHoldStart||Date.now());
+    p._actionHoldStart=0;
+    if(p.core.id==='hive'&&heldFor>=400){
+      recallHiveSummons(p);
+      e.preventDefault();
+    }
+  });
 });
  
 window.addEventListener('resize',()=>{
