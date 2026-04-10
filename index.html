@@ -322,6 +322,20 @@ const DASH_CHAIN_WINDOW_MS       = 1500;
 const DASH_CHAIN_SECOND_MULT     = 0.55;  // regular chain dash second hit (strong)
 const DASH_SBUD_DECAY_MULT       = 0.40;  // 3 dashes ~= regular chain total distance
 const DASH_SBUD_MIN_MULT         = 0.18;  // "until it becomes a slow"
+
+// ════════════════════════════════════════════════════════
+// TIME CORE CONSTANTS
+// ════════════════════════════════════════════════════════
+const TIME_LOAN_MIN_MS            = 8000;
+const TIME_LOAN_MAX_MS            = 10000;
+const TIME_DEBT_DEFAULT_MS        = 10000;
+const TIME_XP_DEBT_MULT           = 0.55;
+const TIME_SPEED_DEBT_MULT        = 1.30;
+const TIME_APPLE_GROWTH_FAIL_CHANCE = 0.50;
+const TIME_DEBT_TRANSFER_RANGE    = 2;
+const TIME_DEBT_TRANSFER_CHANCE   = 0.35;
+const TIME_KILL_XP_BONUS_MULT     = 1.60;
+const TIME_OVERDRAFT_ADD_MS       = 6000;
  
 // ════════════════════════════════════════════════════════
 // PHASE TIMINGS
@@ -435,6 +449,24 @@ const CORE_DEFS = {
         desc:'Improves your selected chain style. Chain Dash is stronger burst; SBUD scales with repeated casts.' },
       { name:'Dash Ark',
         desc:'Dash length increases, cooldown is slightly longer, and dash ends with a small Ark pulse.' },
+    ],
+    xpThresholds: [231, 371, 591],
+    xpPerApple:   4,
+    xpPerKill:    40,
+  },
+  time: {
+    id:    'time',
+    label: 'Time Core',
+    color: '#ff9f43',
+    tiers: [
+      { name:'Time Loan',
+        desc:'Action key grants 8–10s of overdrive: 2× speed, double growth, phase movement, phase-dash Ark pulse, and a soul-husk explosion.' },
+      { name:'Debt Transfer',
+        desc:'During Debt Phase, action key near another snake has a 35% chance to transfer your debt to them.' },
+      { name:'Overdraft',
+        desc:'During Time Loan, press action key again to extend the loan. Debt duration is doubled afterward.' },
+      { name:'Partial Forgiveness',
+        desc:'If you survive Debt Phase, your next Time Loan gets stronger (small duration bonus each success).' },
     ],
     xpThresholds: [231, 371, 591],
     xpPerApple:   4,
@@ -949,6 +981,14 @@ function startGame(){
       splitSummons: [],
       pathHistory: [],
       _actionHoldStart: 0,
+      timeLoanActive: false,
+      timeLoanEnd: 0,
+      timeDebtActive: false,
+      timeDebtStart: 0,
+      timeDebtEnd: 0,
+      timeDebtDuration: TIME_DEBT_DEFAULT_MS,
+      timeOverdraftUsed: false,
+      timeForgivenessStacks: 0,
     };
   });
  
@@ -1067,6 +1107,8 @@ function hasArkCore(p){ return coreAtLeast(p,'ark',0); }
 function arkTier(p){ return coreIs(p,'ark') ? p.core.tier : -1; }
 function hasDashCore(p){ return coreAtLeast(p,'dash',0); }
 function dashTier(p){ return coreIs(p,'dash') ? p.core.tier : -1; }
+function hasTimeCore(p){ return coreAtLeast(p,'time',0); }
+function timeTier(p){ return coreIs(p,'time') ? p.core.tier : -1; }
 function hasPhantomCore(p){ return coreAtLeast(p,'phantom',0); }
 function hasHiveCore(p){ return coreAtLeast(p,'hive',0); }
 function splitTier(p){ return (coreIs(p,'phantom')||coreIs(p,'hive')) ? p.core.tier : -1; }
@@ -1237,6 +1279,108 @@ function triggerDashCore(p){
   }
 }
 
+function triggerTimePhaseDashArk(p){
+  if(!p.alive) return;
+  p._isDashing=true;
+  for(let i=0;i<6&&p.alive;i++) movePlayer(p);
+  p._isDashing=false;
+  const now=Date.now();
+  gameState.slowZones.push({x:p.body[0].x,y:p.body[0].y,r:1,shape:'square',until:now+1500,ownerId:p.id,color:CORE_DEFS.time.color});
+}
+
+function fireBulletFrom(p, origin, dir, pierce=false){
+  if(!origin||!dir||(!dir.dx&&!dir.dy)) return;
+  gameState.bullets.push({x:origin.x,y:origin.y,dx:dir.dx,dy:dir.dy,ownerId:p.id,pierce});
+}
+
+function triggerTimeGunExplosion(p){
+  const head=p.body[0];
+  const tail=p.body[p.body.length-1];
+  if(!head||!tail) return;
+  const fwd={dx:p.dx,dy:p.dy};
+  const tailDir=getTailDirection(p);
+  const left ={x:head.x-p.dy,y:head.y+p.dx};
+  const right={x:head.x+p.dy,y:head.y-p.dx};
+  fireBulletFrom(p,head,fwd,false);
+  fireBulletFrom(p,tail,tailDir,false);
+  fireBulletFrom(p,left,fwd,false);
+  fireBulletFrom(p,right,fwd,false);
+}
+
+function startDebtPhase(p,debtMs){
+  p.timeLoanActive=false;
+  p.timeDebtActive=true;
+  p.timeDebtStart=Date.now();
+  p.timeDebtEnd=Date.now()+debtMs;
+  p.phaseActive=false;
+  showCarnivalToast(`${p.name}: DEBT PHASE`,'#ff6b6b');
+}
+
+function resolveTimeCoreStates(p){
+  if(!hasTimeCore(p)) return;
+  const now=Date.now();
+  if(p.timeLoanActive&&now>=p.timeLoanEnd){
+    const debtMs=(p.timeDebtDuration||TIME_DEBT_DEFAULT_MS)*(p.timeOverdraftUsed?2:1);
+    startDebtPhase(p,debtMs);
+  }
+  if(p.timeDebtActive&&now>=p.timeDebtEnd){
+    p.timeDebtActive=false;
+    p.timeDebtEnd=0;
+    if(timeTier(p)>=3){
+      p.timeForgivenessStacks=Math.min(6,(p.timeForgivenessStacks||0)+1);
+      showCarnivalToast(`${p.name}: Partial Forgiveness +${p.timeForgivenessStacks}`,'#ff9f43');
+    }
+    p.timeOverdraftUsed=false;
+  }
+}
+
+function triggerTimeDebtTransfer(p){
+  if(!p.timeDebtActive||timeTier(p)<1) return;
+  const near=gameState.players.filter(o=>{
+    if(o===p||!o.alive) return false;
+    const dx=Math.abs(o.body[0].x-p.body[0].x);
+    const dy=Math.abs(o.body[0].y-p.body[0].y);
+    return Math.max(dx,dy)<=TIME_DEBT_TRANSFER_RANGE;
+  });
+  if(near.length===0){
+    showCarnivalToast(`${p.name}: No target for debt transfer`,'#ff9f43');
+    return;
+  }
+  if(Math.random()>TIME_DEBT_TRANSFER_CHANCE){
+    showCarnivalToast(`${p.name}: Debt transfer failed`,'#ff9f43');
+    return;
+  }
+  const t=near[Math.floor(Math.random()*near.length)];
+  const remain=Math.max(1500,p.timeDebtEnd-Date.now());
+  p.timeDebtActive=false;p.timeDebtEnd=0;
+  t.timeDebtActive=true;t.timeDebtStart=Date.now();t.timeDebtEnd=Date.now()+remain;
+  showCarnivalToast(`${p.name}: Debt transferred to ${t.name}`,'#ff9f43');
+}
+
+function triggerTimeCore(p){
+  if(!hasTimeCore(p)||!p.alive) return;
+  if(p.timeDebtActive){ triggerTimeDebtTransfer(p); return; }
+  if(p.timeLoanActive){
+    if(timeTier(p)>=2&&!p.timeOverdraftUsed){
+      p.timeOverdraftUsed=true;
+      p.timeLoanEnd+=TIME_OVERDRAFT_ADD_MS;
+      showCarnivalToast(`${p.name}: OVERDRAFT`,'#ff9f43');
+    }
+    return;
+  }
+  const bonusMs=(p.timeForgivenessStacks||0)*350;
+  const duration=Math.floor(TIME_LOAN_MIN_MS+Math.random()*(TIME_LOAN_MAX_MS-TIME_LOAN_MIN_MS))+bonusMs;
+  p.timeLoanActive=true;
+  p.timeLoanEnd=Date.now()+duration;
+  p.timeDebtDuration=TIME_DEBT_DEFAULT_MS;
+  p.timeOverdraftUsed=false;
+  p.phaseActive=true;
+  triggerTimePhaseDashArk(p);
+  gameState.slowZones.push({x:p.body[0].x,y:p.body[0].y,r:1,shape:'square',until:Date.now()+1200,ownerId:p.id,color:CORE_DEFS.time.color});
+  triggerTimeGunExplosion(p);
+  showCarnivalToast(`${p.name}: TIME LOAN`,'#ff9f43');
+}
+
 function zoneContainsCell(z,x,y){
   const dx=Math.abs(x-z.x),dy=Math.abs(y-z.y);
   if(z.shape==='square') return dx<=z.r&&dy<=z.r;
@@ -1257,14 +1401,21 @@ function gameTick(now){
       if(p.respawnTimer>0){p.respawnTimer-=dt;if(p.respawnTimer<=0&&gameState.rules.respawn)respawnPlayer(p);}
       return;
     }
+    resolveTimeCoreStates(p);
+    if(p.timeLoanActive) p.phaseActive=true;
+    else if(hasTimeCore(p)&&!p.phaseCD) p.phaseActive=false;
     p.tickAccum+=dt;if(p.tickAccum<p.speed)return;p.tickAccum=0;
     applyQueuedDirection(p);
- 
+
     // Slipstream buff: each segment beyond 5 gives −1ms speed (max −40ms)
     if(hasBuff(p,'length_speed')){
       const bonus=Math.min(40, Math.max(0, p.body.length-5));
       p.speed=Math.max(BASE_SPEED-40, BASE_SPEED-bonus);
+    } else {
+      p.speed=BASE_SPEED;
     }
+    if(p.timeLoanActive) p.speed=Math.max(60,Math.floor(p.speed*0.5));
+    if(p.timeDebtActive) p.speed=Math.floor(p.speed*TIME_SPEED_DEBT_MULT);
  
     movePlayer(p);
     updateSplitSummons(p);
@@ -1288,7 +1439,12 @@ function gameTick(now){
  
   // Passive core XP over time (all players with a core get a tiny trickle — 1 XP per tick ≈ 7s per 100 XP)
   if(gameState.mode==='rpg'){
-    gameState.players.forEach(p=>{if(p.alive&&p.core)addCoreXP(p,1);});
+    gameState.players.forEach(p=>{
+      if(!(p.alive&&p.core)) return;
+      if(p.timeDebtActive){
+        if(Math.random()<TIME_XP_DEBT_MULT) addCoreXP(p,1);
+      } else addCoreXP(p,1);
+    });
   }
  
   updateBullets();
@@ -1454,6 +1610,8 @@ function collectApple(p,a){
   p.score+=1;
   const evoMult=1;
   let grow=Math.ceil(1*phaseGrowMult);
+  if(p.timeLoanActive) grow*=2;
+  if(p.timeDebtActive && Math.random()<TIME_APPLE_GROWTH_FAIL_CHANCE) grow=0;
   if(evoMult>1) grow=Math.ceil(grow*evoMult);
   if(rpg&&rpg.echoGrowthLevel>0){const triggers=Math.floor((p.applesEaten+1)/5)-Math.floor(p.applesEaten/5);if(triggers>0)grow+=2*rpg.echoGrowthLevel*triggers;}
   if(p._echoBonus>0){grow+=p._echoBonus;p._echoBonus=0;}
@@ -1501,6 +1659,7 @@ function collectApple(p,a){
     let xpGain=def.xpPerApple;
     if(hasBuff(p,'gold_apple'))  xpGain*=1.25;
     if(hasBuff(p,'xp_boost'))    xpGain*=1.15;
+    if(p.timeDebtActive) xpGain*=TIME_XP_DEBT_MULT;
     addCoreXP(p, Math.ceil(xpGain));
   }
 }
@@ -1648,7 +1807,7 @@ function updateBullets(){
 // ════════════════════════════════════════════════════════
 function killPlayer(p,killedById){
   if(!p.alive) return;p.alive=false;p.deathCount++;
-  if(killedById!==null){const k=gameState.players.find(o=>o.id===killedById);if(k){k.kills++;if(k.core){let kxp=CORE_DEFS[k.core.id].xpPerKill;if(hasBuff(k,'xp_boost'))kxp=Math.ceil(kxp*1.15);addCoreXP(k,kxp);}}}
+  if(killedById!==null){const k=gameState.players.find(o=>o.id===killedById);if(k){k.kills++;if(k.core){let kxp=CORE_DEFS[k.core.id].xpPerKill;if(hasBuff(k,'xp_boost'))kxp=Math.ceil(kxp*1.15);if(p.timeDebtActive)kxp=Math.ceil(kxp*TIME_KILL_XP_BONUS_MULT);addCoreXP(k,kxp);}}}
   if(gameState.rules.respawn)p.respawnTimer=3000;
 }
 function respawnPlayer(p){
@@ -1659,6 +1818,11 @@ function respawnPlayer(p){
   if(p.core && coreIs(p,'phase')){ p.phaseCharges = hasDualPhase(p)?2:1; p.phaseCD=false; clearTimeout(p.phaseCDTimer); p._phaseCDEnd=0; }
   if(p.core && coreIs(p,'ark')){ p.arkCDUntil=0; p._coreSuppressedUntil=0; }
   if(p.core && coreIs(p,'dash')){ p.dashCDUntil=0; p.dashChainCount=0; p.dashChainUntil=0; }
+  if(p.core && coreIs(p,'time')){
+    p.timeLoanActive=false;p.timeLoanEnd=0;
+    p.timeDebtActive=false;p.timeDebtStart=0;p.timeDebtEnd=0;
+    p.timeOverdraftUsed=false;
+  }
   setTimeout(()=>{if(p)p.ghost=false;},2000);
 }
  
@@ -1702,6 +1866,13 @@ function updateHUD(){
     else if(p.phaseCD){const rem=Math.max(0,Math.ceil((p._phaseCDEnd-Date.now())/1000));parts.push(`⚡CD ${rem}s`);}
     else if(hasCorePhase(p)&&p.phaseCharges>0)parts.push(`⚡×${p.phaseCharges}`);
     if(p.ghost&&!p.phaseActive)parts.push('GHOST');
+    if(p.timeLoanActive){
+      const rem=Math.max(0,Math.ceil((p.timeLoanEnd-Date.now())/1000));
+      parts.push(`⏱ LOAN ${rem}s`);
+    } else if(p.timeDebtActive){
+      const rem=Math.max(0,Math.ceil((p.timeDebtEnd-Date.now())/1000));
+      parts.push(`💳 DEBT ${rem}s`);
+    }
     if(Date.now()<(p._noWallUntil||0))parts.push('NOWALL');
     if(p._goldApples>0)parts.push(`GOLD×${p._goldApples}`);
     if(p.rpg&&p.rpg.soulInsurance&&!p.insuranceUsed)parts.push('INS✓');
@@ -1980,6 +2151,9 @@ window.addEventListener('keydown',e=>{
       e.preventDefault();
     } else if(p.core.id==='dash'){
       triggerDashCore(p);
+      e.preventDefault();
+    } else if(p.core.id==='time'){
+      triggerTimeCore(p);
       e.preventDefault();
     } else if(p.core.id==='phantom'){
       spawnSplitSummon(p);
