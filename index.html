@@ -322,6 +322,11 @@ const DASH_CHAIN_WINDOW_MS       = 1500;
 const DASH_CHAIN_SECOND_MULT     = 0.55;  // regular chain dash second hit (strong)
 const DASH_SBUD_DECAY_MULT       = 0.40;  // 3 dashes ~= regular chain total distance
 const DASH_SBUD_MIN_MULT         = 0.18;  // "until it becomes a slow"
+
+// Split clone movement smoothing (Phantom / Hive)
+const SPLIT_TURN_BUFFER_TICKS_BASE = 3;
+const SPLIT_TURN_BUFFER_TICKS_STEP = 2;
+const SPLIT_PATH_HISTORY_MAX       = 520;
  
 // ════════════════════════════════════════════════════════
 // PHASE TIMINGS
@@ -1122,22 +1127,30 @@ function recallHiveSummons(p){
 function updateSplitSummons(p){
   if(!p.core||!p.alive) return;
   if(!p.pathHistory) p.pathHistory=[];
-  const head=p.body[0];
-  p.pathHistory.unshift({x:head.x,y:head.y});
-  if(p.pathHistory.length>420) p.pathHistory.length=420;
+  p.pathHistory.unshift({
+    body:p.body.map(seg=>({x:seg.x,y:seg.y})),
+    dx:p.dx,
+    dy:p.dy
+  });
+  if(p.pathHistory.length>SPLIT_PATH_HISTORY_MAX) p.pathHistory.length=SPLIT_PATH_HISTORY_MAX;
   const sideCodes=[-1,1,-2,2,-3,3];
   (p.splitSummons||[]).forEach((s,idx)=>{
     if(!s.alive) return;
     if(s.type==='phantom') s.len=Math.max(3,p.body.length);
+    const delayTicks=SPLIT_TURN_BUFFER_TICKS_BASE + idx*SPLIT_TURN_BUFFER_TICKS_STEP;
+    const delayedState=p.pathHistory[Math.min(delayTicks,p.pathHistory.length-1)]||p.pathHistory[0];
+    if(!delayedState||!delayedState.body||delayedState.body.length===0) return;
+    const delayedBody=delayedState.body;
+    const delayedHead=delayedBody[0];
     const sideCode=sideCodes[idx]||((idx%2===0?-1:1)*(Math.floor(idx/2)+1));
     const sideSign=Math.sign(sideCode)||1;
     const laneDistance=Math.abs(sideCode)*2; // one empty tile between main and side snake
     const nextBody=[];
     for(let i=0;i<s.len;i++){
-      const base=p.body[Math.min(i,p.body.length-1)]||head;
-      const next=p.body[Math.min(i+1,p.body.length-1)]||base;
+      const base=delayedBody[Math.min(i,delayedBody.length-1)]||delayedHead;
+      const next=delayedBody[Math.min(i+1,delayedBody.length-1)]||base;
       let dirX=base.x-next.x,dirY=base.y-next.y;
-      if(Math.abs(dirX)+Math.abs(dirY)!==1){dirX=p.dx;dirY=p.dy;}
+      if(Math.abs(dirX)+Math.abs(dirY)!==1){dirX=delayedState.dx;dirY=delayedState.dy;}
       // Left perpendicular for sign < 0, right perpendicular for sign > 0
       const perX=sideSign<0 ? -dirY : dirY;
       const perY=sideSign<0 ?  dirX : -dirX;
