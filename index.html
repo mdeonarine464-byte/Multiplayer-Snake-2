@@ -1353,8 +1353,9 @@ function attemptDebtTransfer(p){
     clearTimeout(p._timeDebtTimeout); p.timeDebtActive=false; p.timeDebtEnd=0;
     if(!target.timeDebtActive){
       target.timeDebtActive=true; target.timeDebtEnd=now+remain;
-      clearTimeout(target._timeDebtTimeout);
+      clearTimeout(target._timeDebtTimeout||null);
       target._timeDebtTimeout=setTimeout(()=>endTimeDebt(target),remain);
+      if(target.timeLoanActive===undefined) target.timeLoanActive=false; // ensure debt display works on any player
       showCarnivalToast(`${p.name}: DEBT TRANSFERRED → ${target.name}!`,CORE_DEFS.time.color);
     } else {
       showCarnivalToast(`${p.name}: Debt escaped — ${target.name} already in debt!`,CORE_DEFS.time.color);
@@ -1424,7 +1425,8 @@ function gameTick(now){
       p.speed=Math.max(50,Math.round(BASE_SPEED*(TIME_LOAN_SPEED_FACTOR-fb)));
     } else if(p.timeDebtActive){
       p.speed=Math.round(BASE_SPEED*TIME_DEBT_SPEED_FACTOR);
-    } else if(coreIs(p,'time')&&!hasBuff(p,'length_speed')){
+    } else if(!hasBuff(p,'length_speed')&&p.speed!==BASE_SPEED&&!p.timeLoanActive){
+      // Reset any player (incl. debt-transfer recipients) back to base when effects have expired
       p.speed=BASE_SPEED;
     }
 
