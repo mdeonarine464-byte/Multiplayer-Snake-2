@@ -333,7 +333,22 @@ const PHASE_DURATION_BASE = 5000 + CORE_TIME_BONUS_MS;
 const PHASE_CD_BASE       = 7500 + CORE_TIME_BONUS_MS;
 const SHEDDING_SLOW_ZONE_MS = 3000 + CORE_TIME_BONUS_MS;
 const SHEDDING_BRICK_MS     = 15000 + CORE_TIME_BONUS_MS;
- 
+
+// ════════════════════════════════════════════════════════
+// TIME CORE CONSTANTS
+// ════════════════════════════════════════════════════════
+const TIME_LOAN_DURATION_BASE    = 9000;  // 9s active loan (between 8-10)
+const TIME_DEBT_DURATION_BASE    = 12000; // 12s debt phase
+const TIME_OVERDRAFT_LOAN_BONUS  = 4000;  // +4s to loan when overdrafting
+const TIME_OVERDRAFT_DEBT_MULT   = 2;     // debt lasts 2× on overdraft
+const TIME_DEBT_TRANSFER_CHANCE  = 0.35;  // 35% to transfer debt
+const TIME_DEBT_TRANSFER_RANGE   = 4;     // Chebyshev range in tiles
+const TIME_LOAN_SPEED_FACTOR     = 0.5;   // 2× speed = half tick delay
+const TIME_DEBT_SPEED_FACTOR     = 1.30;  // 30% slower during debt
+const TIME_LOAN_GUN_INTERVAL_MS  = 2000;  // auto gun explosion every 2s
+const TIME_LOAN_ARK_INTERVAL_MS  = 2200;  // auto ark zone every 2.2s
+const TIME_FORGIVENESS_MAX       = 3;     // max partial forgiveness stacks
+
 // ════════════════════════════════════════════════════════
 // CORE DEFINITIONS
 // Each core has 4 tiers (index 0 = base, 1-3 = upgrades).
@@ -471,6 +486,24 @@ const CORE_DEFS = {
         desc:'Raise max hive snakes to 3 (4 total snakes including your main snake).' },
       { name:'Cell Division',
         desc:'Splitting no longer consumes main snake length.' },
+    ],
+    xpThresholds: [231, 371, 591],
+    xpPerApple:   4,
+    xpPerKill:    40,
+  },
+  time: {
+    id:    'time',
+    label: 'Time Core',
+    color: '#ff9900',
+    tiers: [
+      { name:'Time Loan',
+        desc:'Action key: take a loan. Gain 2× speed, double growth, phasing, Gun Explosion (husks in all 4 directions every 2s) and Phase Dash Ark (3×3 slow at head every 2.2s) for 9s. Afterward: Debt Phase — 30% slow, marked for death (killers gain +50% XP), halved XP, 50% chance apples give no length.' },
+      { name:'Debt Transfer',
+        desc:'During Debt Phase, press action near a snake (≤4 tiles) for a 35% chance to shift your debt to them.' },
+      { name:'Overdraft',
+        desc:'Press action during your loan to extend it by 4s — but the following Debt Phase lasts twice as long.' },
+      { name:'Partial Forgiveness',
+        desc:"Survive Debt Phase without dying to boost next loan's speed and duration. Stacks up to 3 times." },
     ],
     xpThresholds: [231, 371, 591],
     xpPerApple:   4,
@@ -949,6 +982,17 @@ function startGame(){
       splitSummons: [],
       pathHistory: [],
       _actionHoldStart: 0,
+      // Time Core runtime state (also used when debt is transferred from another player)
+      timeLoanActive: false,
+      timeDebtActive: false,
+      timeLoanEnd: 0,
+      timeDebtEnd: 0,
+      _timeLoanTimeout: null,
+      _timeDebtTimeout: null,
+      _timeOverdraftUsed: false,
+      _timeLoanBonus: 0,        // partial forgiveness stacks (0-3)
+      _timeLoanGunNext: 0,
+      _timeLoanArkNext: 0,
     };
   });
  
@@ -1028,6 +1072,8 @@ function addCoreXP(p, amount){
   if(!p.core) return;
   const def=CORE_DEFS[p.core.id];
   if(p.core.tier>=3) return; // fully evolved
+  // Time Debt: XP halved
+  if(p.timeDebtActive) amount=Math.max(0,Math.floor(amount*0.5));
   p.core.xp+=amount;
   const needed=def.xpThresholds[p.core.tier];
   if(p.core.xp>=needed){
@@ -1070,6 +1116,9 @@ function dashTier(p){ return coreIs(p,'dash') ? p.core.tier : -1; }
 function hasPhantomCore(p){ return coreAtLeast(p,'phantom',0); }
 function hasHiveCore(p){ return coreAtLeast(p,'hive',0); }
 function splitTier(p){ return (coreIs(p,'phantom')||coreIs(p,'hive')) ? p.core.tier : -1; }
+// Time Core helpers
+function hasTimeCore(p){ return coreAtLeast(p,'time',0); }
+function timeTier(p){ return coreIs(p,'time') ? p.core.tier : -1; }
 
 function getSplitMaxSummons(p){
   const t=splitTier(p);
@@ -1237,6 +1286,109 @@ function triggerDashCore(p){
   }
 }
 
+
+// ════════════════════════════════════════════════════════
+// TIME CORE — Loan Phase & Debt Phase mechanics
+// ════════════════════════════════════════════════════════
+function getTimeLoanDuration(p){
+  return TIME_LOAN_DURATION_BASE + (p._timeLoanBonus||0)*500;
+}
+function getTimeDebtDuration(p){
+  return TIME_DEBT_DURATION_BASE * (p._timeOverdraftUsed ? TIME_OVERDRAFT_DEBT_MULT : 1);
+}
+function activateTimeLoan(p){
+  if(!hasTimeCore(p)||p.timeLoanActive||p.timeDebtActive) return;
+  const now=Date.now(), dur=getTimeLoanDuration(p);
+  p.timeLoanActive=true; p.timeLoanEnd=now+dur;
+  p._timeOverdraftUsed=false;
+  p.phaseActive=true;
+  p._timeLoanGunNext=now+TIME_LOAN_GUN_INTERVAL_MS;
+  p._timeLoanArkNext=now+TIME_LOAN_ARK_INTERVAL_MS;
+  clearTimeout(p._timeLoanTimeout);
+  p._timeLoanTimeout=setTimeout(()=>endTimeLoan(p),dur);
+  const stacks=p._timeLoanBonus||0;
+  showCarnivalToast(`${p.name}: TIME LOAN — POWER UP!`+(stacks>0?` (Forgiveness ×${stacks})`:''),CORE_DEFS.time.color);
+}
+function triggerOverdraft(p){
+  if(!coreAtLeast(p,'time',2)||!p.timeLoanActive||p._timeOverdraftUsed) return;
+  p._timeOverdraftUsed=true;
+  clearTimeout(p._timeLoanTimeout);
+  const now=Date.now(), remaining=Math.max(0,p.timeLoanEnd-now)+TIME_OVERDRAFT_LOAN_BONUS;
+  p.timeLoanEnd=now+remaining;
+  p._timeLoanTimeout=setTimeout(()=>endTimeLoan(p),remaining);
+  showCarnivalToast(`${p.name}: OVERDRAFT — loan extended! Debt ×2.`,CORE_DEFS.time.color);
+}
+function endTimeLoan(p){
+  if(!p.timeLoanActive) return;
+  p.timeLoanActive=false; p.timeLoanEnd=0;
+  if(!hasCorePhase(p)) p.phaseActive=false;
+  if(p.alive) activateTimeDebt(p);
+}
+function activateTimeDebt(p){
+  if(p.timeDebtActive) return;
+  const now=Date.now(), dur=getTimeDebtDuration(p);
+  p.timeDebtActive=true; p.timeDebtEnd=now+dur;
+  clearTimeout(p._timeDebtTimeout);
+  p._timeDebtTimeout=setTimeout(()=>endTimeDebt(p),dur);
+  showCarnivalToast(`${p.name}: DEBT PHASE — repay your loan…`,'#ff4444');
+}
+function endTimeDebt(p){
+  if(!p.timeDebtActive) return;
+  p.timeDebtActive=false; p.timeDebtEnd=0;
+  if(coreAtLeast(p,'time',3)&&p.alive){
+    p._timeLoanBonus=Math.min(TIME_FORGIVENESS_MAX,(p._timeLoanBonus||0)+1);
+    showCarnivalToast(`${p.name}: PARTIAL FORGIVENESS ×${p._timeLoanBonus}!`,CORE_DEFS.time.color);
+  } else {
+    showCarnivalToast(`${p.name}: Debt repaid.`,'#888888');
+  }
+}
+function attemptDebtTransfer(p){
+  if(!coreAtLeast(p,'time',1)||!p.timeDebtActive) return;
+  const hx=p.body[0].x,hy=p.body[0].y;
+  const nearby=gameState.players.filter(o=>o!==p&&o.alive&&Math.max(Math.abs(o.body[0].x-hx),Math.abs(o.body[0].y-hy))<=TIME_DEBT_TRANSFER_RANGE);
+  if(!nearby.length){showCarnivalToast(`${p.name}: No snake in range for Debt Transfer.`,'#888888');return;}
+  if(Math.random()<TIME_DEBT_TRANSFER_CHANCE){
+    const target=nearby[Math.floor(Math.random()*nearby.length)];
+    const now=Date.now(), remain=Math.max(2000,p.timeDebtEnd-now);
+    clearTimeout(p._timeDebtTimeout); p.timeDebtActive=false; p.timeDebtEnd=0;
+    if(!target.timeDebtActive){
+      target.timeDebtActive=true; target.timeDebtEnd=now+remain;
+      clearTimeout(target._timeDebtTimeout);
+      target._timeDebtTimeout=setTimeout(()=>endTimeDebt(target),remain);
+      showCarnivalToast(`${p.name}: DEBT TRANSFERRED → ${target.name}!`,CORE_DEFS.time.color);
+    } else {
+      showCarnivalToast(`${p.name}: Debt escaped — ${target.name} already in debt!`,CORE_DEFS.time.color);
+    }
+  } else {
+    showCarnivalToast(`${p.name}: Debt Transfer FAILED (35% chance)`,'#ff4444');
+  }
+}
+// Called each player move-tick during Loan Phase: handles periodic Gun Explosion & Phase Dash Ark.
+function updateTimeLoanEffects(p){
+  if(!p.timeLoanActive||!p.alive) return;
+  const now=Date.now();
+  if(now>=p._timeLoanGunNext){
+    p._timeLoanGunNext=now+TIME_LOAN_GUN_INTERVAL_MS;
+    fireTimeLoanGunExplosion(p);
+  }
+  if(now>=p._timeLoanArkNext){
+    p._timeLoanArkNext=now+TIME_LOAN_ARK_INTERVAL_MS;
+    gameState.slowZones.push({x:p.body[0].x,y:p.body[0].y,r:1,shape:'square',until:now+3500,ownerId:p.id,color:CORE_DEFS.time.color});
+  }
+}
+function fireTimeLoanGunExplosion(p){
+  if(!p.body||!p.body.length||(!p.dx&&!p.dy)) return;
+  const h=p.body[0], t=p.body[p.body.length-1];
+  // Head direction
+  gameState.bullets.push({x:h.x,y:h.y,dx:p.dx,dy:p.dy,ownerId:p.id,pierce:false,timeBullet:true});
+  // Tail (opposite)
+  gameState.bullets.push({x:t.x,y:t.y,dx:-p.dx,dy:-p.dy,ownerId:p.id,pierce:false,timeBullet:true});
+  // Left perpendicular of head  (CCW 90°: [dy, -dx])
+  gameState.bullets.push({x:h.x,y:h.y,dx:p.dy,dy:-p.dx,ownerId:p.id,pierce:false,timeBullet:true});
+  // Right perpendicular of head (CW  90°: [-dy, dx])
+  gameState.bullets.push({x:h.x,y:h.y,dx:-p.dy,dy:p.dx,ownerId:p.id,pierce:false,timeBullet:true});
+}
+
 function zoneContainsCell(z,x,y){
   const dx=Math.abs(x-z.x),dy=Math.abs(y-z.y);
   if(z.shape==='square') return dx<=z.r&&dy<=z.r;
@@ -1266,7 +1418,18 @@ function gameTick(now){
       p.speed=Math.max(BASE_SPEED-40, BASE_SPEED-bonus);
     }
  
+    // Time Core: override speed during loan (2×) or debt (30% slow)
+    if(p.timeLoanActive){
+      const fb=Math.min(TIME_FORGIVENESS_MAX,p._timeLoanBonus||0)*0.05;
+      p.speed=Math.max(50,Math.round(BASE_SPEED*(TIME_LOAN_SPEED_FACTOR-fb)));
+    } else if(p.timeDebtActive){
+      p.speed=Math.round(BASE_SPEED*TIME_DEBT_SPEED_FACTOR);
+    } else if(coreIs(p,'time')&&!hasBuff(p,'length_speed')){
+      p.speed=BASE_SPEED;
+    }
+
     movePlayer(p);
+    if(p.timeLoanActive) updateTimeLoanEffects(p);
     updateSplitSummons(p);
   });
 
@@ -1457,6 +1620,9 @@ function collectApple(p,a){
   if(evoMult>1) grow=Math.ceil(grow*evoMult);
   if(rpg&&rpg.echoGrowthLevel>0){const triggers=Math.floor((p.applesEaten+1)/5)-Math.floor(p.applesEaten/5);if(triggers>0)grow+=2*rpg.echoGrowthLevel*triggers;}
   if(p._echoBonus>0){grow+=p._echoBonus;p._echoBonus=0;}
+  // Time Core: double growth during loan; 50% chance no growth during debt
+  if(p.timeLoanActive) grow*=2;
+  if(p.timeDebtActive&&Math.random()<0.5) grow=0;
   p.growCount+=grow;
   p.applesEaten++;
   if(rpg&&rpg.phaseCharge&&p.phaseCD)reducePhaseCooldown(p,0.5);
@@ -1648,7 +1814,13 @@ function updateBullets(){
 // ════════════════════════════════════════════════════════
 function killPlayer(p,killedById){
   if(!p.alive) return;p.alive=false;p.deathCount++;
-  if(killedById!==null){const k=gameState.players.find(o=>o.id===killedById);if(k){k.kills++;if(k.core){let kxp=CORE_DEFS[k.core.id].xpPerKill;if(hasBuff(k,'xp_boost'))kxp=Math.ceil(kxp*1.15);addCoreXP(k,kxp);}}}
+  // Capture debt state BEFORE clearing (used for kill XP bonus below)
+  const wasInDebt=!!p.timeDebtActive;
+  // Time Core: clear loan and debt on death (no Partial Forgiveness)
+  if(p.timeLoanActive){clearTimeout(p._timeLoanTimeout);p.timeLoanActive=false;p.timeLoanEnd=0;if(!hasCorePhase(p))p.phaseActive=false;}
+  if(p.timeDebtActive){clearTimeout(p._timeDebtTimeout);p.timeDebtActive=false;p.timeDebtEnd=0;}
+  if(killedById!==null){const k=gameState.players.find(o=>o.id===killedById);if(k){k.kills++;if(k.core){let kxp=CORE_DEFS[k.core.id].xpPerKill;if(hasBuff(k,'xp_boost'))kxp=Math.ceil(kxp*1.15);if(wasInDebt)kxp=Math.ceil(kxp*1.5); // Marked for death: +50% XP
+addCoreXP(k,kxp);}}}
   if(gameState.rules.respawn)p.respawnTimer=3000;
 }
 function respawnPlayer(p){
@@ -1659,6 +1831,10 @@ function respawnPlayer(p){
   if(p.core && coreIs(p,'phase')){ p.phaseCharges = hasDualPhase(p)?2:1; p.phaseCD=false; clearTimeout(p.phaseCDTimer); p._phaseCDEnd=0; }
   if(p.core && coreIs(p,'ark')){ p.arkCDUntil=0; p._coreSuppressedUntil=0; }
   if(p.core && coreIs(p,'dash')){ p.dashCDUntil=0; p.dashChainCount=0; p.dashChainUntil=0; }
+  // Time Core: clear loan and debt on respawn
+  clearTimeout(p._timeLoanTimeout); p.timeLoanActive=false; p.timeLoanEnd=0;
+  clearTimeout(p._timeDebtTimeout); p.timeDebtActive=false; p.timeDebtEnd=0;
+  if(!hasCorePhase(p)) p.phaseActive=false;
   setTimeout(()=>{if(p)p.ghost=false;},2000);
 }
  
@@ -1735,6 +1911,26 @@ function updateHUD(){
     if(Date.now()<(p._coreSuppressedUntil||0)){
       const supRem=Math.ceil((p._coreSuppressedUntil-Date.now())/1000);
       parts.push(`⚡SUPP ${supRem}s`);
+    }
+
+    // Time Core HUD indicators
+    if(hasTimeCore(p)){
+      if(p.timeLoanActive){
+        const rem=Math.max(0,Math.ceil((p.timeLoanEnd-Date.now())/1000));
+        parts.push(`⏱LOAN ${rem}s`);
+        if(p._timeOverdraftUsed) parts.push('OD');
+      } else if(p.timeDebtActive){
+        const rem=Math.max(0,Math.ceil((p.timeDebtEnd-Date.now())/1000));
+        parts.push(`💸DEBT ${rem}s`);
+      } else {
+        parts.push('⏱READY');
+      }
+      if((p._timeLoanBonus||0)>0) parts.push(`🎁×${p._timeLoanBonus}`);
+    }
+    // Debt indicator for non-Time-Core players (debt can be transferred)
+    if(!hasTimeCore(p)&&p.timeDebtActive){
+      const rem=Math.max(0,Math.ceil((p.timeDebtEnd-Date.now())/1000));
+      parts.push(`💸DEBT ${rem}s`);
     }
     ste.textContent=parts.join(' · ');
  
@@ -1842,14 +2038,17 @@ function draw(){
   });
   gameState.brickWalls=(gameState.brickWalls||[]).filter(b=>b.until>now);
  
-  // Bullets (Gun Core)
+  // Bullets (Gun Core + Time Core)
   (gameState.bullets||[]).forEach(b=>{
-    // Legacy projectile rendering
-    ctx.fillStyle='#8ab4ff';
+    const tc=b.timeBullet;
+    ctx.fillStyle=tc?'#ff9900':'#8ab4ff';
+    ctx.shadowColor=tc?'#ffcc44':'transparent';
+    ctx.shadowBlur=tc?6:0;
     ctx.fillRect(b.x*CELL+5,b.y*CELL+5,CELL-10,CELL-10);
-    ctx.strokeStyle='#d9e8ff';
+    ctx.strokeStyle=tc?'#ffdd88':'#d9e8ff';
     ctx.lineWidth=1;
     ctx.strokeRect(b.x*CELL+5,b.y*CELL+5,CELL-10,CELL-10);
+    ctx.shadowBlur=0;ctx.shadowColor='transparent';
   });
 
   // Apples (S2 style: +2 offset, size-4, shadowBlur=10)
@@ -1907,6 +2106,19 @@ function draw(){
       const def=CORE_DEFS[p.core.id];
       ctx.fillStyle=def.color;ctx.globalAlpha=0.8;
       ctx.beginPath();ctx.arc(p.body[0].x*CELL+CELL/2,p.body[0].y*CELL-4,3,0,Math.PI*2);ctx.fill();
+      ctx.globalAlpha=1;
+    }
+    // Time Core: golden aura during loan, red marker during debt
+    if(p.alive&&p.timeLoanActive){
+      const pulse=0.55+0.25*Math.sin(Date.now()/120);
+      ctx.strokeStyle='#ff9900';ctx.lineWidth=2;ctx.globalAlpha=pulse;
+      ctx.shadowColor='#ff9900';ctx.shadowBlur=10;
+      p.body.forEach((seg,i)=>{if(i===0||i%2===0) ctx.strokeRect(seg.x*CELL-1,seg.y*CELL-1,CELL+2,CELL+2);});
+      ctx.globalAlpha=1;ctx.shadowBlur=0;ctx.shadowColor='transparent';
+    } else if(p.alive&&p.timeDebtActive){
+      const pulse=0.4+0.3*Math.sin(Date.now()/200);
+      ctx.strokeStyle='#ff2222';ctx.lineWidth=2;ctx.globalAlpha=pulse;
+      ctx.strokeRect(p.body[0].x*CELL-2,p.body[0].y*CELL-2,CELL+4,CELL+4);
       ctx.globalAlpha=1;
     }
   });
@@ -1986,6 +2198,15 @@ window.addEventListener('keydown',e=>{
       e.preventDefault();
     } else if(p.core.id==='hive'){
       spawnSplitSummon(p);
+      e.preventDefault();
+    } else if(p.core.id==='time'){
+      if(p.timeLoanActive&&coreAtLeast(p,'time',2)&&!p._timeOverdraftUsed){
+        triggerOverdraft(p);
+      } else if(p.timeDebtActive&&coreAtLeast(p,'time',1)){
+        attemptDebtTransfer(p);
+      } else if(!p.timeLoanActive&&!p.timeDebtActive){
+        activateTimeLoan(p);
+      }
       e.preventDefault();
     }
   });
