@@ -350,6 +350,13 @@ const TIME_LOAN_ARK_INTERVAL_MS  = 2200;  // auto ark zone every 2.2s
 const TIME_FORGIVENESS_MAX       = 3;     // max partial forgiveness stacks
 
 // ════════════════════════════════════════════════════════
+// SHADOW CORE CONSTANTS
+// ════════════════════════════════════════════════════════
+const SHADOW_CD_MS          = 2500;   // cooldown starts when shadow deactivates
+const SHADOW_CLONE_SLOW_MS  = 3000;   // how long enemies are slowed on clone hit (tier 2)
+const SHADOW_CLONE_MAX_LEN  = 6;      // max body segments the clone trails
+
+// ════════════════════════════════════════════════════════
 // CORE DEFINITIONS
 // Each core has 4 tiers (index 0 = base, 1-3 = upgrades).
 // xpThresholds[i] = XP needed to unlock tier i+1 from tier i.
@@ -504,6 +511,24 @@ const CORE_DEFS = {
         desc:'Press action during your loan to extend it by 4s — but the following Debt Phase lasts twice as long.' },
       { name:'Partial Forgiveness',
         desc:"Survive Debt Phase without dying to boost next loan's speed and duration. Stacks up to 3 times." },
+    ],
+    xpThresholds: [231, 371, 591],
+    xpPerApple:   4,
+    xpPerKill:    40,
+  },
+  shadow: {
+    id:    'shadow',
+    label: 'Shadow Core',
+    color: '#9b59b6',
+    tiers: [
+      { name:'Shadow Shift',
+        desc:'Action key: your tail turns invisible while your head stays visible. Press again to turn visible (8s cooldown on deactivation).' },
+      { name:'Shadow Clone',
+        desc:'Activating Shadow Shift spawns a decoy clone at your tail. The clone runs off independently with an invisible body — it cannot kill enemies.' },
+      { name:'Shadow Ark',
+        desc:'Enemies whose head enters a shadow clone cell are hit with a 3s slow zone.' },
+      { name:'Shadow Swap',
+        desc:'While shadow and clone are active, press action to instantly swap positions with your clone.' },
     ],
     xpThresholds: [231, 371, 591],
     xpPerApple:   4,
@@ -993,6 +1018,10 @@ function startGame(){
       _timeLoanBonus: 0,        // partial forgiveness stacks (0-3)
       _timeLoanGunNext: 0,
       _timeLoanArkNext: 0,
+      // Shadow Core runtime state
+      shadowActive: false,      // tail is invisible, head visible
+      shadowClones: [],         // active shadow clone objects
+      shadowCDUntil: 0,         // cooldown timestamp
     };
   });
  
@@ -1119,6 +1148,9 @@ function splitTier(p){ return (coreIs(p,'phantom')||coreIs(p,'hive')) ? p.core.t
 // Time Core helpers
 function hasTimeCore(p){ return coreAtLeast(p,'time',0); }
 function timeTier(p){ return coreIs(p,'time') ? p.core.tier : -1; }
+// Shadow Core helpers
+function hasShadowCore(p){ return coreAtLeast(p,'shadow',0); }
+function shadowTier(p){ return coreIs(p,'shadow') ? p.core.tier : -1; }
 
 function getSplitMaxSummons(p){
   const t=splitTier(p);
@@ -1166,6 +1198,115 @@ function recallHiveSummons(p){
     p.growCount+=Math.max(0,bonus);
   }
   p.splitSummons=[];
+}
+
+// ════════════════════════════════════════════════════════
+// SHADOW CORE — toggle tail invisibility + decoy clone
+// ════════════════════════════════════════════════════════
+function triggerShadowCore(p){
+  if(!hasShadowCore(p)) return;
+  const now=Date.now();
+  const tier=shadowTier(p);
+
+  // Tier 3: while shadow + clone active, press again to swap with clone
+  if(tier>=3 && p.shadowActive && p.shadowClones && p.shadowClones.some(c=>c.alive)){
+    doShadowSwap(p);
+    return;
+  }
+
+  if(p.shadowActive){
+    // Deactivate shadow — apply cooldown and kill all clones
+    p.shadowActive=false;
+    p.shadowClones=[];
+    p.shadowCDUntil=now+SHADOW_CD_MS;
+  } else {
+    // Activate shadow — check cooldown
+    if(now<(p.shadowCDUntil||0)) return;
+    p.shadowActive=true;
+    // Tier 1+: spawn a shadow clone at the tail
+    if(tier>=1) spawnShadowClone(p);
+  }
+}
+
+function spawnShadowClone(p){
+  if(!p.body||p.body.length<2) return;
+  // Clone head starts at the tail, moving in the same direction as the player
+  const cloneLen=Math.min(SHADOW_CLONE_MAX_LEN,p.body.length);
+  // Build clone body: tail-end segments reversed so index-0 is the "head" at the tail
+  const cloneBody=p.body.slice(-cloneLen).reverse().map(s=>({x:s.x,y:s.y}));
+  p.shadowClones.push({
+    id:`shclone-${p.id}-${Date.now()}`,
+    body:cloneBody,
+    dx:p.dx,
+    dy:p.dy,
+    alive:true,
+    tickAccum:0,
+    ownerId:p.id,
+  });
+}
+
+function updateShadowClones(p,dt){
+  if(!p.shadowClones||p.shadowClones.length===0||!p.alive) return;
+  const{gridW,gridH,rules}=gameState;
+  const now=Date.now();
+  p.shadowClones.forEach(clone=>{
+    if(!clone.alive) return;
+    clone.tickAccum=(clone.tickAccum||0)+dt;
+    if(clone.tickAccum<p.speed) return;
+    clone.tickAccum=0;
+    const newHead={x:clone.body[0].x+clone.dx, y:clone.body[0].y+clone.dy};
+    if(rules.wallWrap){
+      newHead.x=(newHead.x+gridW)%gridW;
+      newHead.y=(newHead.y+gridH)%gridH;
+    } else if(newHead.x<0||newHead.x>=gridW||newHead.y<0||newHead.y>=gridH){
+      clone.alive=false;
+      return;
+    }
+    clone.body.unshift(newHead);
+    if(clone.body.length>SHADOW_CLONE_MAX_LEN) clone.body.pop();
+    // Shadow Ark (tier 2): slow any enemy whose head touches any clone body cell
+    if(shadowTier(p)>=2){
+      gameState.players.forEach(enemy=>{
+        if(enemy.id===p.id||!enemy.alive) return;
+        const eh=enemy.body[0];
+        const hit=clone.body.some(seg=>seg.x===eh.x&&seg.y===eh.y);
+        if(hit){
+          gameState.slowZones.push({
+            x:eh.x,y:eh.y,r:1,
+            until:now+SHADOW_CLONE_SLOW_MS,
+            ownerId:p.id,color:CORE_DEFS.shadow.color,shape:'square',
+          });
+        }
+      });
+    }
+  });
+  p.shadowClones=p.shadowClones.filter(c=>c.alive);
+  // Deactivate shadow if all clones died naturally (tier 1+)
+  if(shadowTier(p)>=1&&p.shadowActive&&p.shadowClones.length===0){
+    p.shadowActive=false;
+    p.shadowCDUntil=Date.now()+SHADOW_CD_MS;
+  }
+}
+
+function doShadowSwap(p){
+  const clone=p.shadowClones&&p.shadowClones.find(c=>c.alive);
+  if(!clone) return;
+  // Teleport entire snake body to align with clone's head
+  const offsetX=clone.body[0].x-p.body[0].x;
+  const offsetY=clone.body[0].y-p.body[0].y;
+  const{gridW,gridH}=gameState;
+  p.body=p.body.map(seg=>({
+    x:(seg.x+offsetX+gridW)%gridW,
+    y:(seg.y+offsetY+gridH)%gridH,
+  }));
+  // Adopt clone direction
+  p.dx=clone.dx;
+  p.dy=clone.dy;
+  p.inputQueue=[];
+  clone.alive=false;
+  p.shadowClones=p.shadowClones.filter(c=>c.alive);
+  p.shadowActive=false;
+  p.shadowCDUntil=Date.now()+SHADOW_CD_MS;
 }
 
 function updateSplitSummons(p){
@@ -1433,6 +1574,7 @@ function gameTick(now){
     movePlayer(p);
     if(p.timeLoanActive) updateTimeLoanEffects(p);
     updateSplitSummons(p);
+    updateShadowClones(p,dt);
   });
 
   // Split snake apple collection
@@ -1929,6 +2071,17 @@ function updateHUD(){
       }
       if((p._timeLoanBonus||0)>0) parts.push(`🎁×${p._timeLoanBonus}`);
     }
+    // Shadow Core HUD
+    if(hasShadowCore(p)){
+      if(p.shadowActive){
+        const cloneCount=(p.shadowClones||[]).filter(c=>c.alive).length;
+        parts.push(cloneCount>0?`🌑SHADOW 👥${cloneCount}`:'🌑SHADOW');
+      } else {
+        const cdRem=Math.max(0,Math.ceil(((p.shadowCDUntil||0)-Date.now())/1000));
+        if(cdRem>0) parts.push(`🌑CD ${cdRem}s`);
+        else parts.push('🌑READY');
+      }
+    }
     // Debt indicator for non-Time-Core players (debt can be transferred)
     if(!hasTimeCore(p)&&p.timeDebtActive){
       const rem=Math.max(0,Math.ceil((p.timeDebtEnd-Date.now())/1000));
@@ -2091,18 +2244,54 @@ function draw(){
       ctx.globalAlpha=1;
     });
   });
+
+  // Shadow clones (Shadow Core) — only the head is visible, body is hidden
+  players.forEach(p=>{
+    (p.shadowClones||[]).forEach(clone=>{
+      if(!clone.alive||!clone.body||clone.body.length===0) return;
+      const head=clone.body[0];
+      // Draw clone head: same style as a normal head but slightly transparent
+      ctx.globalAlpha=0.75;
+      ctx.shadowColor='#ffffff';ctx.shadowBlur=12;
+      ctx.fillStyle='#fff';
+      ctx.fillRect(head.x*CELL+1,head.y*CELL+1,CELL-2,CELL-2);
+      ctx.shadowBlur=0;ctx.shadowColor='transparent';
+      // Faint core-color outline to hint it's shadow
+      ctx.strokeStyle=CORE_DEFS.shadow.color;ctx.lineWidth=1.5;ctx.globalAlpha=0.6;
+      ctx.strokeRect(head.x*CELL-1,head.y*CELL-1,CELL+2,CELL+2);
+      ctx.globalAlpha=1;
+    });
+  });
  
   // Snakes
   players.forEach(p=>{
     if(!p.alive&&p.respawnTimer<=0&&!gameState.rules.respawn) return;
     const isPhasing=p.phaseActive;
-    // S2 alpha: phasing=0.5, dead=0.15, ghost=0.45, alive=1.0
-    const alpha=isPhasing?0.5:(!p.alive?0.15:p.ghost?0.45:1);
-    ctx.globalAlpha=alpha;
-    p.body.forEach((seg,i)=>drawSnakeSegment(seg,i===0,isPhasing,p.color));
-    ctx.globalAlpha=1;ctx.shadowBlur=0;ctx.shadowColor='transparent';
+    const isShadow=p.shadowActive&&hasShadowCore(p);
+    if(isShadow){
+      // Shadow Shift: head at full alpha, body nearly invisible
+      ctx.globalAlpha=1;
+      drawSnakeSegment(p.body[0],true,false,p.color);
+      ctx.globalAlpha=0.06;
+      p.body.slice(1).forEach(seg=>drawSnakeSegment(seg,false,false,p.color));
+      ctx.globalAlpha=1;ctx.shadowBlur=0;ctx.shadowColor='transparent';
+    } else {
+      // S2 alpha: phasing=0.5, dead=0.15, ghost=0.45, alive=1.0
+      const alpha=isPhasing?0.5:(!p.alive?0.15:p.ghost?0.45:1);
+      ctx.globalAlpha=alpha;
+      p.body.forEach((seg,i)=>drawSnakeSegment(seg,i===0,isPhasing,p.color));
+      ctx.globalAlpha=1;ctx.shadowBlur=0;ctx.shadowColor='transparent';
+    }
     if(p.ghost&&p.alive){ctx.strokeStyle='rgba(255,255,255,0.3)';ctx.lineWidth=1;ctx.strokeRect(p.body[0].x*CELL+1,p.body[0].y*CELL+1,CELL-2,CELL-2);}
     if(isPhasing){ctx.strokeStyle='rgba(160,32,240,0.65)';ctx.lineWidth=2;ctx.strokeRect(p.body[0].x*CELL-1,p.body[0].y*CELL-1,CELL+2,CELL+2);}
+    // Shadow Core: pulsing dark outline on head while shadow is active
+    if(isShadow&&p.alive){
+      const pulse=0.45+0.3*Math.sin(now/200);
+      ctx.strokeStyle=CORE_DEFS.shadow.color;ctx.lineWidth=2;ctx.globalAlpha=pulse;
+      ctx.shadowColor=CORE_DEFS.shadow.color;ctx.shadowBlur=8;
+      ctx.strokeRect(p.body[0].x*CELL-1,p.body[0].y*CELL-1,CELL+2,CELL+2);
+      ctx.globalAlpha=1;ctx.shadowBlur=0;ctx.shadowColor='transparent';
+    }
     // Core icon above head (small coloured dot)
     if(p.core&&p.alive){
       const def=CORE_DEFS[p.core.id];
@@ -2209,6 +2398,9 @@ window.addEventListener('keydown',e=>{
       } else if(!p.timeLoanActive&&!p.timeDebtActive){
         activateTimeLoan(p);
       }
+      e.preventDefault();
+    } else if(p.core.id==='shadow'){
+      triggerShadowCore(p);
       e.preventDefault();
     }
   });
