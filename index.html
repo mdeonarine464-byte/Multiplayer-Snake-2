@@ -338,6 +338,7 @@ const SHEDDING_BRICK_MS     = 15000 + CORE_TIME_BONUS_MS;
 // SHADOW CORE CONSTANTS
 // ════════════════════════════════════════════════════════
 const SHADOW_CD_MS          = 2500;   // 2.5s cooldown after deactivating veil
+const SHADOW_SWAP_CD_MS     = 3000;   // 3s cooldown between shadow swaps
 const SHADOW_CLONE_SLOW_MS  = 3000;   // slow duration when enemy hits clone (tier 2)
 
 // ════════════════════════════════════════════════════════
@@ -1020,6 +1021,7 @@ function startGame(){
       // Shadow Core runtime state
       shadowVeilActive: false,
       shadowCDUntil: 0,
+      shadowSwapCDUntil: 0,
       shadowClone: null,
     };
   });
@@ -1434,16 +1436,17 @@ function spawnShadowClone(p){
 
 function doShadowSwap(p){
   if(!p.shadowClone||!p.shadowClone.alive) return;
+  const now=Date.now();
+  if(now<(p.shadowSwapCDUntil||0)) return;
   const clone=p.shadowClone;
   const cHead={x:clone.body[0].x,y:clone.body[0].y};
   const pHead={x:p.body[0].x,y:p.body[0].y};
   const cDx=clone.dx,cDy=clone.dy,pDx=p.dx,pDy=p.dy;
-  // Teleport player head to clone head
   p.body.unshift(cHead);p.body.pop();
   p.dx=cDx;p.dy=cDy;
-  // Teleport clone head to player old head
   clone.body.unshift(pHead);clone.body.pop();
   clone.dx=pDx;clone.dy=pDy;
+  p.shadowSwapCDUntil=now+SHADOW_SWAP_CD_MS;
   showCarnivalToast(`${p.name}: SHADOW SWAP!`,CORE_DEFS.shadow.color);
 }
 
@@ -1948,7 +1951,7 @@ function respawnPlayer(p){
   if(p.core && coreIs(p,'phase')){ p.phaseCharges = hasDualPhase(p)?2:1; p.phaseCD=false; clearTimeout(p.phaseCDTimer); p._phaseCDEnd=0; }
   if(p.core && coreIs(p,'ark')){ p.arkCDUntil=0; p._coreSuppressedUntil=0; }
   if(p.core && coreIs(p,'dash')){ p.dashCDUntil=0; p.dashChainCount=0; p.dashChainUntil=0; }
-  if(p.core && coreIs(p,'shadow')){ p.shadowVeilActive=false; p.shadowCDUntil=0; if(p.shadowClone){p.shadowClone.alive=false;p.shadowClone=null;} }
+  if(p.core && coreIs(p,'shadow')){ p.shadowVeilActive=false; p.shadowCDUntil=0; p.shadowSwapCDUntil=0; if(p.shadowClone){p.shadowClone.alive=false;p.shadowClone=null;} }
   // Time Core: clear loan and debt on respawn
   clearTimeout(p._timeLoanTimeout); p.timeLoanActive=false; p.timeLoanEnd=0;
   clearTimeout(p._timeDebtTimeout); p.timeDebtActive=false; p.timeDebtEnd=0;
@@ -2058,6 +2061,8 @@ function updateHUD(){
       if(!p.shadowVeilActive&&scd>0) parts.push(`🌑CD ${scd}s`);
       else if(!p.shadowVeilActive) parts.push('🌑READY');
       if(p.shadowClone&&p.shadowClone.alive) parts.push('👥CLONE');
+      const swapCd=Math.max(0,Math.ceil(((p.shadowSwapCDUntil||0)-sNow)/1000));
+      if(swapCd>0) parts.push(`🔀CD ${swapCd}s`);
     }
     ste.textContent=parts.join(' · ');
  
@@ -2217,18 +2222,23 @@ function draw(){
     });
   });
  
-  // Shadow clones (Shadow Core) — visible head, invisible tail; flicker on hit then vanish
+  // Shadow clones (Shadow Core) — visible head, invisible tail; full body flickers on hit
   players.forEach(p=>{
     if(!p.shadowClone||!p.shadowClone.alive) return;
     const clone=p.shadowClone;
     const cloneNow=Date.now();
     if(clone.flickerUntil>0){
-      // Flicker: toggle visibility every 120ms
+      // Flicker whole body (head + tail) every 120ms
       if(Math.floor(cloneNow/120)%2===0) return;
+      clone.body.forEach((seg,i)=>{
+        ctx.globalAlpha=1;
+        drawSnakeSegment(seg,i===0,false,p.color);
+      });
+    } else {
+      // Normal: head visible, tail invisible
+      ctx.globalAlpha=1;
+      drawSnakeSegment(clone.body[0],true,false,p.color);
     }
-    // Head fully visible, tail invisible (matches parent shadow veil look)
-    ctx.globalAlpha=1;
-    drawSnakeSegment(clone.body[0],true,false,p.color);
     ctx.globalAlpha=1;ctx.shadowBlur=0;ctx.shadowColor='transparent';
   });
 
