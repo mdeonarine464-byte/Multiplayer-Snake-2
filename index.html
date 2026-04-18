@@ -335,6 +335,13 @@ const SHEDDING_SLOW_ZONE_MS = 3000 + CORE_TIME_BONUS_MS;
 const SHEDDING_BRICK_MS     = 15000 + CORE_TIME_BONUS_MS;
 
 // ════════════════════════════════════════════════════════
+// SHADOW CORE CONSTANTS
+// ════════════════════════════════════════════════════════
+const SHADOW_CD_MS          = 2500;   // 2.5s cooldown after deactivating veil
+const SHADOW_SWAP_CD_MS     = 3000;   // 3s cooldown between shadow swaps
+const SHADOW_CLONE_SLOW_MS  = 3000;   // slow duration when enemy hits clone (tier 2)
+
+// ════════════════════════════════════════════════════════
 // TIME CORE CONSTANTS
 // ════════════════════════════════════════════════════════
 const TIME_LOAN_DURATION_BASE    = 9000;  // 9s active loan (between 8-10)
@@ -504,6 +511,24 @@ const CORE_DEFS = {
         desc:'Press action during your loan to extend it by 4s — but the following Debt Phase lasts twice as long.' },
       { name:'Partial Forgiveness',
         desc:"Survive Debt Phase without dying to boost next loan's speed and duration. Stacks up to 3 times." },
+    ],
+    xpThresholds: [231, 371, 591],
+    xpPerApple:   4,
+    xpPerKill:    40,
+  },
+  shadow: {
+    id:    'shadow',
+    label: 'Shadow Core',
+    color: '#9966ff',
+    tiers: [
+      { name:'Shadow Veil',
+        desc:'Press to make your tail fully invisible (head stays visible). Press again to reveal. 2.5s cooldown.' },
+      { name:'Shadow Clone',
+        desc:'Activating also spawns a ghost duplicate from your tail that runs off independently. Cannot kill snakes.' },
+      { name:'Shadow Ark',
+        desc:'Snakes that run into the shadow clone\'s head or body are slowed for 3s.' },
+      { name:'Shadow Swap',
+        desc:'While clone is alive, press again (while veil active) to instantly swap positions with your clone.' },
     ],
     xpThresholds: [231, 371, 591],
     xpPerApple:   4,
@@ -993,6 +1018,12 @@ function startGame(){
       _timeLoanBonus: 0,        // partial forgiveness stacks (0-3)
       _timeLoanGunNext: 0,
       _timeLoanArkNext: 0,
+      // Shadow Core runtime state
+      shadowVeilActive: false,
+      shadowCDUntil: 0,
+      shadowSwapCDUntil: 0,
+      shadowFlickerUntil: 0,
+      shadowClone: null,
     };
   });
  
@@ -1119,6 +1150,10 @@ function splitTier(p){ return (coreIs(p,'phantom')||coreIs(p,'hive')) ? p.core.t
 // Time Core helpers
 function hasTimeCore(p){ return coreAtLeast(p,'time',0); }
 function timeTier(p){ return coreIs(p,'time') ? p.core.tier : -1; }
+
+// Shadow Core helpers
+function hasShadowCore(p){ return coreAtLeast(p,'shadow',0); }
+function shadowTier(p){ return coreIs(p,'shadow') ? p.core.tier : -1; }
 
 function getSplitMaxSummons(p){
   const t=splitTier(p);
@@ -1390,6 +1425,72 @@ function fireTimeLoanGunExplosion(p){
   gameState.bullets.push({x:h.x,y:h.y,dx:-p.dy,dy:p.dx,ownerId:p.id,pierce:false,timeBullet:true});
 }
 
+// ════════════════════════════════════════════════════════
+// SHADOW CORE — Veil, Clone, Ark, Swap
+// ════════════════════════════════════════════════════════
+function spawnShadowClone(p){
+  const td=getTailDirection(p);
+  // Clone starts at tail, body is reversed copy of player body (tail becomes clone head)
+  const cloneBody=p.body.slice().reverse().map(s=>({x:s.x,y:s.y}));
+  p.shadowClone={body:cloneBody,dx:td.dx,dy:td.dy,alive:true,flickerUntil:0};
+}
+
+function doShadowSwap(p){
+  if(!p.shadowClone||!p.shadowClone.alive) return;
+  const now=Date.now();
+  if(now<(p.shadowSwapCDUntil||0)) return;
+  const clone=p.shadowClone;
+  const cHead={x:clone.body[0].x,y:clone.body[0].y};
+  const pHead={x:p.body[0].x,y:p.body[0].y};
+  const cDx=clone.dx,cDy=clone.dy,pDx=p.dx,pDy=p.dy;
+  p.body.unshift(cHead);p.body.pop();
+  p.dx=cDx;p.dy=cDy;
+  clone.body.unshift(pHead);clone.body.pop();
+  clone.dx=pDx;clone.dy=pDy;
+  p.shadowSwapCDUntil=now+SHADOW_SWAP_CD_MS;
+  showCarnivalToast(`${p.name}: SHADOW SWAP!`,CORE_DEFS.shadow.color);
+}
+
+function triggerShadowCore(p){
+  if(!hasShadowCore(p)||!p.alive) return;
+  const now=Date.now();
+  if(now<(p._coreSuppressedUntil||0)) return;
+  if(p.shadowVeilActive){
+    // Tier 3: swap only if clone alive AND swap not on cooldown; otherwise fall back to tier 0 (turn visible)
+    if(shadowTier(p)>=3&&p.shadowClone&&p.shadowClone.alive&&now>=(p.shadowSwapCDUntil||0)){
+      doShadowSwap(p);
+    } else {
+      p.shadowVeilActive=false;
+      p.shadowCDUntil=now+SHADOW_CD_MS;
+    }
+  } else {
+    if(now<(p.shadowCDUntil||0)) return;
+    p.shadowVeilActive=true;
+    // Tier 1+: spawn clone if none active
+    if(shadowTier(p)>=1&&!p.shadowClone){
+      spawnShadowClone(p);
+      showCarnivalToast(`${p.name}: SHADOW CLONE`,CORE_DEFS.shadow.color);
+    } else {
+      showCarnivalToast(`${p.name}: SHADOW VEIL`,CORE_DEFS.shadow.color);
+    }
+  }
+}
+
+function updateShadowClone(p){
+  if(!p.shadowClone||!p.shadowClone.alive) return;
+  const clone=p.shadowClone;
+  const now=Date.now();
+  if(clone.flickerUntil>0){
+    if(now>=clone.flickerUntil){clone.alive=false;p.shadowClone=null;}
+    return; // frozen during flicker
+  }
+  const{gridW,gridH}=gameState;
+  const nx=(clone.body[0].x+clone.dx+gridW)%gridW;
+  const ny=(clone.body[0].y+clone.dy+gridH)%gridH;
+  clone.body.unshift({x:nx,y:ny});
+  clone.body.pop();
+}
+
 function zoneContainsCell(z,x,y){
   const dx=Math.abs(x-z.x),dy=Math.abs(y-z.y);
   if(z.shape==='square') return dx<=z.r&&dy<=z.r;
@@ -1433,6 +1534,7 @@ function gameTick(now){
     movePlayer(p);
     if(p.timeLoanActive) updateTimeLoanEffects(p);
     updateSplitSummons(p);
+    updateShadowClone(p);
   });
 
   // Split snake apple collection
@@ -1531,8 +1633,25 @@ function movePlayer(p){
     for(const other of gameState.players){
       if(other===p||!other.alive) continue;
       if(rules.headOn&&other.body[0].x===head.x&&other.body[0].y===head.y){killPlayer(p,other.id);killPlayer(other,p.id);return;}
-      if(other.body.slice(1).some(s=>s.x===head.x&&s.y===head.y)){killPlayer(p,other.id);return;}
+      if(other.body.slice(1).some(s=>s.x===head.x&&s.y===head.y)){
+        if(other.shadowVeilActive&&hasShadowCore(other)) other.shadowFlickerUntil=Date.now()+1500;
+        killPlayer(p,other.id);return;
+      }
       if((other.splitSummons||[]).some(s=>s.body&&s.body.some(seg=>seg.x===head.x&&seg.y===head.y))){killPlayer(p,other.id);return;}
+    }
+    // Shadow clone: no kill; hit triggers 1.5s flicker then clone dies; tier 2+ also slows
+    const now_sc=Date.now();
+    for(const owner of gameState.players){
+      if(owner===p||!owner.alive||!owner.shadowClone||!owner.shadowClone.alive) continue;
+      const clone=owner.shadowClone;
+      if(clone.flickerUntil>0) continue; // already flickering, ignore further hits
+      if(clone.body.some(seg=>seg.x===head.x&&seg.y===head.y)){
+        clone.flickerUntil=now_sc+1500;
+        if(shadowTier(owner)>=2){
+          gameState.slowZones.push({x:head.x,y:head.y,r:1,until:now_sc+SHADOW_CLONE_SLOW_MS,ownerId:owner.id,color:CORE_DEFS.shadow.color});
+          showCarnivalToast(`${owner.name}: SHADOW ARK — ${p.name} slowed!`,CORE_DEFS.shadow.color);
+        }
+      }
     }
   }
   if(!p.alive) return;
@@ -1816,6 +1935,9 @@ function updateBullets(){
 // ════════════════════════════════════════════════════════
 function killPlayer(p,killedById){
   if(!p.alive) return;p.alive=false;p.deathCount++;
+  // Clear shadow state on death
+  p.shadowVeilActive=false;
+  if(p.shadowClone){p.shadowClone.alive=false;p.shadowClone=null;}
   // Capture debt state BEFORE clearing (used for kill XP bonus below)
   const wasInDebt=!!p.timeDebtActive;
   // Time Core: clear loan and debt on death (no Partial Forgiveness)
@@ -1833,6 +1955,7 @@ function respawnPlayer(p){
   if(p.core && coreIs(p,'phase')){ p.phaseCharges = hasDualPhase(p)?2:1; p.phaseCD=false; clearTimeout(p.phaseCDTimer); p._phaseCDEnd=0; }
   if(p.core && coreIs(p,'ark')){ p.arkCDUntil=0; p._coreSuppressedUntil=0; }
   if(p.core && coreIs(p,'dash')){ p.dashCDUntil=0; p.dashChainCount=0; p.dashChainUntil=0; }
+  if(p.core && coreIs(p,'shadow')){ p.shadowVeilActive=false; p.shadowCDUntil=0; p.shadowSwapCDUntil=0; if(p.shadowClone){p.shadowClone.alive=false;p.shadowClone=null;} }
   // Time Core: clear loan and debt on respawn
   clearTimeout(p._timeLoanTimeout); p.timeLoanActive=false; p.timeLoanEnd=0;
   clearTimeout(p._timeDebtTimeout); p.timeDebtActive=false; p.timeDebtEnd=0;
@@ -1933,6 +2056,17 @@ function updateHUD(){
     if(!hasTimeCore(p)&&p.timeDebtActive){
       const rem=Math.max(0,Math.ceil((p.timeDebtEnd-Date.now())/1000));
       parts.push(`💸DEBT ${rem}s`);
+    }
+    // Shadow Core HUD
+    if(hasShadowCore(p)){
+      if(p.shadowVeilActive) parts.push('🌑VEIL');
+      const sNow=Date.now();
+      const scd=Math.max(0,Math.ceil(((p.shadowCDUntil||0)-sNow)/1000));
+      if(!p.shadowVeilActive&&scd>0) parts.push(`🌑CD ${scd}s`);
+      else if(!p.shadowVeilActive) parts.push('🌑READY');
+      if(p.shadowClone&&p.shadowClone.alive) parts.push('👥CLONE');
+      const swapCd=Math.max(0,Math.ceil(((p.shadowSwapCDUntil||0)-sNow)/1000));
+      if(swapCd>0) parts.push(`🔀CD ${swapCd}s`);
     }
     ste.textContent=parts.join(' · ');
  
@@ -2092,15 +2226,53 @@ function draw(){
     });
   });
  
+  // Shadow clones (Shadow Core) — visible head, invisible tail; full body flickers on hit
+  players.forEach(p=>{
+    if(!p.shadowClone||!p.shadowClone.alive) return;
+    const clone=p.shadowClone;
+    const cloneNow=Date.now();
+    if(clone.flickerUntil>0){
+      // Flicker whole body (head + tail) every 120ms
+      if(Math.floor(cloneNow/120)%2===0) return;
+      clone.body.forEach((seg,i)=>{
+        ctx.globalAlpha=1;
+        drawSnakeSegment(seg,i===0,false,p.color);
+      });
+    } else {
+      // Normal: head visible, tail invisible
+      ctx.globalAlpha=1;
+      drawSnakeSegment(clone.body[0],true,false,p.color);
+    }
+    ctx.globalAlpha=1;ctx.shadowBlur=0;ctx.shadowColor='transparent';
+  });
+
   // Snakes
   players.forEach(p=>{
     if(!p.alive&&p.respawnTimer<=0&&!gameState.rules.respawn) return;
     const isPhasing=p.phaseActive;
-    // S2 alpha: phasing=0.5, dead=0.15, ghost=0.45, alive=1.0
-    const alpha=isPhasing?0.5:(!p.alive?0.15:p.ghost?0.45:1);
-    ctx.globalAlpha=alpha;
-    p.body.forEach((seg,i)=>drawSnakeSegment(seg,i===0,isPhasing,p.color));
-    ctx.globalAlpha=1;ctx.shadowBlur=0;ctx.shadowColor='transparent';
+    const isShadowVeil=p.shadowVeilActive&&hasShadowCore(p);
+    const isBodyFlicker=isShadowVeil&&p.shadowFlickerUntil>Date.now();
+    if(isShadowVeil&&!isBodyFlicker){
+      // Head stays visible; tail fully invisible
+      const headAlpha=isPhasing?0.5:(!p.alive?0.15:p.ghost?0.45:1);
+      ctx.globalAlpha=headAlpha;
+      drawSnakeSegment(p.body[0],true,isPhasing,p.color);
+      ctx.globalAlpha=1;ctx.shadowBlur=0;ctx.shadowColor='transparent';
+    } else if(isBodyFlicker){
+      // Full body flickers every 120ms to reveal the invisible tail
+      if(Math.floor(Date.now()/120)%2!==0){
+        const alpha=isPhasing?0.5:(!p.alive?0.15:p.ghost?0.45:1);
+        ctx.globalAlpha=alpha;
+        p.body.forEach((seg,i)=>drawSnakeSegment(seg,i===0,isPhasing,p.color));
+        ctx.globalAlpha=1;ctx.shadowBlur=0;ctx.shadowColor='transparent';
+      }
+    } else {
+      // S2 alpha: phasing=0.5, dead=0.15, ghost=0.45, alive=1.0
+      const alpha=isPhasing?0.5:(!p.alive?0.15:p.ghost?0.45:1);
+      ctx.globalAlpha=alpha;
+      p.body.forEach((seg,i)=>drawSnakeSegment(seg,i===0,isPhasing,p.color));
+      ctx.globalAlpha=1;ctx.shadowBlur=0;ctx.shadowColor='transparent';
+    }
     if(p.ghost&&p.alive){ctx.strokeStyle='rgba(255,255,255,0.3)';ctx.lineWidth=1;ctx.strokeRect(p.body[0].x*CELL+1,p.body[0].y*CELL+1,CELL-2,CELL-2);}
     if(isPhasing){ctx.strokeStyle='rgba(160,32,240,0.65)';ctx.lineWidth=2;ctx.strokeRect(p.body[0].x*CELL-1,p.body[0].y*CELL-1,CELL+2,CELL+2);}
     // Core icon above head (small coloured dot)
@@ -2209,6 +2381,9 @@ window.addEventListener('keydown',e=>{
       } else if(!p.timeLoanActive&&!p.timeDebtActive){
         activateTimeLoan(p);
       }
+      e.preventDefault();
+    } else if(p.core.id==='shadow'){
+      triggerShadowCore(p);
       e.preventDefault();
     }
   });
