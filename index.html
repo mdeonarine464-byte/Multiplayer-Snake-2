@@ -1456,8 +1456,8 @@ function triggerShadowCore(p){
   const now=Date.now();
   if(now<(p._coreSuppressedUntil||0)) return;
   if(p.shadowVeilActive){
-    // Tier 3: if clone alive, swap instead of turning off
-    if(shadowTier(p)>=3&&p.shadowClone&&p.shadowClone.alive){
+    // Tier 3: swap only if clone alive AND swap not on cooldown; otherwise fall back to tier 0 (turn visible)
+    if(shadowTier(p)>=3&&p.shadowClone&&p.shadowClone.alive&&now>=(p.shadowSwapCDUntil||0)){
       doShadowSwap(p);
     } else {
       p.shadowVeilActive=false;
