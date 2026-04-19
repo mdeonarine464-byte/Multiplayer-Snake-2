@@ -294,10 +294,10 @@ const SWATCH_COLORS=[
  
 // ════════════════════════════════════════════════════════
 // ACTION KEYS — one per player slot, for core abilities
-// P1=Q  P2=Y  P3=Ctrl
+// P1 (Arrows)=Ctrl  P2 (WASD)=Q  P3 (UHJK)=Y
 // ════════════════════════════════════════════════════════
-const ACTION_KEYS = ['q', 'y', 'Control'];
-const ACTION_KEY_LABELS = ['Q', 'Y', 'Ctrl'];
+const ACTION_KEYS = ['Control', 'q', 'y'];
+const ACTION_KEY_LABELS = ['Ctrl', 'Q', 'Y'];
 
 // ════════════════════════════════════════════════════════
 // ARK CORE CONSTANTS
@@ -2340,7 +2340,7 @@ window.addEventListener('keydown',e=>{
     if(key===k.right) next={dx:1, dy:0};
     if(next){queueDir(p,next);e.preventDefault();}
   });
-  // Action keys: Q=P1, Y=P2, Ctrl=P3
+  // Action keys: Ctrl=P1 (Arrows), Q=P2 (WASD), Y=P3 (UHJK)
   // Each player uses their action key to activate their core ability
   ACTION_KEYS.forEach((ak,slot)=>{
     const matched = e.key===ak || e.key.toLowerCase()===ak.toLowerCase();
