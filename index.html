@@ -363,7 +363,7 @@ const GAMBLER_VEIL_MS          = 3000;   // Veil Roll shadow duration
 const GAMBLER_LOAN_MS          = 3000;   // Loan Roll speed boost duration
 const GAMBLER_PHANTOM_MS       = 8000;   // Phantom Roll summon lifetime
 const GAMBLER_FAKE_CHIPS_MULT  = 1.5;    // Fake Chips XP multiplier (Poker tier 1)
-const GAMBLER_FAKE_CHIPS_SKIP  = 0.35;   // Fake Chips growth-skip chance (Poker tier 1)
+const GAMBLER_FAKE_CHIPS_SKIP  = 2/3;    // Fake Chips growth-skip chance (Poker tier 1) — ⅔
 
 // ════════════════════════════════════════════════════════
 // TIME CORE CONSTANTS
@@ -564,13 +564,13 @@ const CORE_DEFS = {
     color: '#FFD700',
     tiers: [
       { name:'Wild Roll',
-        desc:'Press to trigger a random tier-0 core ability at base power. 8s cooldown.' },
+        desc:'Press to trigger a random base ability (phase, shed, shot, ark, dash, phantom, loan, veil). 8s cooldown.' },
       { name:'Pick a Path',
-        desc:'🃏 Poker – Fake Chips: XP gain ×1.5, but 35% chance apples give no body length. | 🎲 Craps – All In: Trigger all 8 gambler abilities simultaneously. 20s cooldown.' },
-      { name:'Raise the Stakes',
-        desc:'🃏 Poker – Loaded Dice: Every 2nd press triggers your chosen locked ability instead of random. | 🎲 Craps – Snake Eyes: 50% triggers twice, 50% doubles cooldown.' },
-      { name:'All or Nothing',
-        desc:'🃏 Poker – Marked Deck: Abilities cycle in a fixed order — no more randomness. HUD shows next. | 🎲 Craps – Devil\'s Hands: All In also hijacks other players\' cores for 10 seconds.' },
+        desc:'🃏 Poker – Fake Chips: XP gain ×1.5, but ⅔ chance apples give no body length. | 🎲 Craps – Loaded Dice: Every 2nd press fires your pre-chosen locked ability instead of random.' },
+      { name:'Double Down',
+        desc:'🃏 Poker – All In: Trigger all 9 abilities at once (20s CD). | 🎲 Craps – Snake Eyes: 50% ability triggers twice, 50% cooldown doubles.' },
+      { name:'Final Bet',
+        desc:'🃏 Poker – Devil\'s Hands: All In also physically rotates other players\' cores for 10 seconds. | 🎲 Craps – Marked Deck: Abilities cycle in a fixed order — HUD shows the next one.' },
     ],
     xpThresholds: [231, 371, 591],
     xpPerApple:   4,
@@ -1133,8 +1133,8 @@ function startGame(){
       gamblerPressCount: 0,
       gamblerCycleIndex: 0,
       _gamblerLoanActive: false,
-      _gamblerForcedRollUntil: 0,    // Devil's Hands: forced wild roll when hijacked
-      _gamblerHijackCDUntil: 0,      // mini-CD between forced rolls
+      _devilsHandsSavedCore: null,   // Devil's Hands: original core saved during swap
+      _devilsHandsUntil: 0,          // Devil's Hands: when swap expires
       splitSummons: [],
       pathHistory: [],
       _actionHoldStart: 0,
@@ -1343,10 +1343,12 @@ function recallHiveSummons(p){
 function updateSplitSummons(p){
   if(!p.core||!p.alive) return;
   if(!p.pathHistory) p.pathHistory=[];
-  // Expire and remove timed gambler phantom summons
+  // Expire and remove timed gambler summons (phantom + hive)
   const nowSS=Date.now();
-  (p.splitSummons||[]).forEach(s=>{if(s._gamblerPhantom&&s.gamblerExpiry&&nowSS>=s.gamblerExpiry)s.alive=false;});
-  p.splitSummons=(p.splitSummons||[]).filter(s=>!(s._gamblerPhantom&&!s.alive));
+  (p.splitSummons||[]).forEach(s=>{
+    if((s._gamblerPhantom||s._gamblerHive)&&s.gamblerExpiry&&nowSS>=s.gamblerExpiry) s.alive=false;
+  });
+  p.splitSummons=(p.splitSummons||[]).filter(s=>!((s._gamblerPhantom||s._gamblerHive)&&!s.alive));
   const head=p.body[0];
   p.pathHistory.unshift({x:head.x,y:head.y});
   if(p.pathHistory.length>420) p.pathHistory.length=420;
@@ -1639,15 +1641,84 @@ function zoneContainsCell(z,x,y){
 }
 
 // ════════════════════════════════════════════════════════
-// GAMBLER CORE — Wild Roll, All In, Loaded Dice, Snake Eyes,
-//                Marked Deck, Fake Chips, Devil's Hands
-// ══════════════════���═══════════════════════════════��═════
+// GAMBLER CORE
+// Poker:  T1=Fake Chips (passive)  T2=All In  T3=Devil's Hands
+// Craps:  T1=Loaded Dice  T2=Snake Eyes  T3=Marked Deck
+// ════════════════════════════════════════════════════════
+
+// Devil's Hands — physically rotates core IDs among other living players for 10s.
+function restoreDevilsHands(p){
+  if(!p._devilsHandsSavedCore) return;
+  p.core.id=p._devilsHandsSavedCore.id;
+  p.core.tier=p._devilsHandsSavedCore.tier;
+  p.core.xp=p._devilsHandsSavedCore.xp;
+  p._devilsHandsSavedCore=null;
+  p._devilsHandsUntil=0;
+}
+
 function triggerDevilsHands(caster){
   const now=Date.now();
-  const targets=gameState.players.filter(p=>p!==caster&&p.alive&&p.core);
-  if(targets.length===0){showCarnivalToast(`${caster.name}: 😈 DEVIL'S HANDS — no targets!`,CORE_DEFS.gambler.color);return;}
-  targets.forEach(p=>{p._gamblerForcedRollUntil=now+GAMBLER_DEVILS_HANDS_MS;p._gamblerHijackCDUntil=0;});
-  showCarnivalToast(`${caster.name}: 😈 DEVIL'S HANDS — ${targets.length} core(s) hijacked for ${GAMBLER_DEVILS_HANDS_MS/1000}s!`,CORE_DEFS.gambler.color);
+  const targets=gameState.players.filter(p=>p!==caster&&p.alive&&p.core&&p.core.id!=='gambler');
+  if(targets.length<1){showCarnivalToast(`${caster.name}: 😈 DEVIL'S HANDS — no targets!`,CORE_DEFS.gambler.color);return;}
+  // Save originals (don't overwrite a live swap)
+  targets.forEach(p=>{
+    if(!p._devilsHandsSavedCore) p._devilsHandsSavedCore={id:p.core.id,tier:p.core.tier,xp:p.core.xp};
+  });
+  // Rotate core IDs: each player receives the next player's core (tier reset to 0)
+  const ids=targets.map(p=>p._devilsHandsSavedCore.id);
+  targets.forEach((p,i)=>{
+    p.core.id=ids[(i+1)%ids.length];
+    p.core.tier=0; p.core.xp=0;
+    p._devilsHandsUntil=now+GAMBLER_DEVILS_HANDS_MS;
+    // Prime the new core's cooldowns so it can fire immediately
+    if(p.core.id==='phase'){p.phaseCharges=1;p.phaseCD=false;p._phaseCDEnd=0;}
+    if(p.core.id==='ark') p.arkCDUntil=0;
+    if(p.core.id==='dash'){p.dashCDUntil=0;p.dashChainCount=0;}
+    if(p.core.id==='gun') p.gunCDUntil=0;
+    if(p.core.id==='shadow') p.shadowCDUntil=0;
+    clearTimeout(p._devilsHandsRestoreTO);
+    p._devilsHandsRestoreTO=setTimeout(()=>restoreDevilsHands(p),GAMBLER_DEVILS_HANDS_MS);
+  });
+  showCarnivalToast(`${caster.name}: 😈 DEVIL'S HANDS — ${targets.length} core(s) swapped for ${GAMBLER_DEVILS_HANDS_MS/1000}s!`,CORE_DEFS.gambler.color);
+}
+
+// All In — fires 9 specific abilities simultaneously.
+function triggerAllIn(p){
+  const now=Date.now();
+  // 1. Phase (Ghost Roll)
+  GAMBLER_ROLL_ABILITIES[0].apply(p);
+  // 2. Shed
+  GAMBLER_ROLL_ABILITIES[1].apply(p);
+  // 3. Shoot soul husk
+  GAMBLER_ROLL_ABILITIES[2].apply(p);
+  // 4. Ark pulse
+  GAMBLER_ROLL_ABILITIES[3].apply(p);
+  // 5. Dash
+  GAMBLER_ROLL_ABILITIES[4].apply(p);
+  // 6 & 7. Clear previous gambler summons, spawn phantom LEFT (idx 0) and hive RIGHT (idx 1)
+  p.splitSummons=(p.splitSummons||[]).filter(s=>!s._gamblerPhantom&&!s._gamblerHive);
+  // Phantom on LEFT side — follows player mirrored at sideCode=-1 (lane=2)
+  p.splitSummons.push({
+    id:`allin-ph-${p.id}-${now}`,type:'phantom',len:Math.max(3,p.body.length),offset:6,
+    body:p.body.map(s=>({x:s.x,y:s.y})),
+    alive:true,_gamblerPhantom:true,gamblerExpiry:now+GAMBLER_PHANTOM_MS,
+  });
+  // Hive clone on RIGHT side — costs half body length; sideCode=1 (lane=2)
+  const hiveLen=Math.max(3,Math.floor(p.body.length/2));
+  const hiveBodySrc=p.body.slice(-hiveLen).map(s=>({x:s.x,y:s.y}));
+  const removed=trimBodyKeepMin(p,hiveLen);
+  if(removed>=3){
+    p.splitSummons.push({
+      id:`allin-hv-${p.id}-${now}`,type:'hive',len:removed,offset:10,
+      body:hiveBodySrc,
+      alive:true,_gamblerHive:true,gamblerExpiry:now+GAMBLER_PHANTOM_MS,
+    });
+  }
+  // 8. Time loan (speed burst + growth)
+  GAMBLER_ROLL_ABILITIES[6].apply(p);
+  // 9. Shadow veil
+  GAMBLER_ROLL_ABILITIES[7].apply(p);
+  showCarnivalToast(`${p.name}: 🃏 ALL IN — 9 ABILITIES!`,CORE_DEFS.gambler.color);
 }
 
 function triggerGamblerCore(p){
@@ -1659,60 +1730,56 @@ function triggerGamblerCore(p){
   const tier=gamblerTier(p);
   const path=p.gamblerPath||'poker';
 
-  if(tier>=1 && path==='craps'){
-    // ── CRAPS PATH: All In ───────────────────────────────
-    let cdMs=GAMBLER_ALL_IN_CD_MS;
-    let repeat=1;
-
-    // Snake Eyes (tier 2): 50% triggers twice, 50% doubles CD
-    if(tier>=2){
-      if(Math.random()<0.5){
-        repeat=2;
-        showCarnivalToast(`${p.name}: 🎲 SNAKE EYES — DOUBLE ROLL!`,CORE_DEFS.gambler.color);
-      } else {
-        cdMs*=2;
-        showCarnivalToast(`${p.name}: 🎲 SNAKE EYES — BAD LUCK! CD ×2`,'#ff4444');
-      }
-    }
-
-    for(let r=0;r<repeat;r++) GAMBLER_ROLL_ABILITIES.forEach(ab=>ab.apply(p));
-
-    if(tier<2 || repeat>1){
-      showCarnivalToast(`${p.name}: 🎲 ALL IN — ALL ABILITIES!${repeat>1?' ×2':''}`,CORE_DEFS.gambler.color);
-    }
-
-    // Devil's Hands (tier 3): hijack other cores
-    if(tier>=3) triggerDevilsHands(p);
-
-    p.gamblerCDUntil=now+cdMs;
-
-  } else {
-    // ── POKER PATH / TIER 0: Wild Roll ───────────────────
-    p.gamblerPressCount=(p.gamblerPressCount||0)+1;
-    let ability;
-
-    if(tier>=3 && path==='poker'){
-      // Marked Deck: deterministic cycle through all abilities
-      p.gamblerCycleIndex=(p.gamblerCycleIndex||0)%GAMBLER_ROLL_ABILITIES.length;
-      ability=GAMBLER_ROLL_ABILITIES[p.gamblerCycleIndex];
-      p.gamblerCycleIndex++;
-      const nextName=GAMBLER_ROLL_ABILITIES[p.gamblerCycleIndex%GAMBLER_ROLL_ABILITIES.length].name;
-      ability.apply(p);
-      showCarnivalToast(`${p.name}: 🃏 ${ability.name} [next: ${nextName}]`,ability.color);
-    } else if(tier>=2 && path==='poker' && p.gamblerPressCount%2===0){
-      // Loaded Dice: every 2nd press uses the locked ability
-      ability=GAMBLER_ROLL_ABILITIES[p.gamblerLockedAbility||0];
-      ability.apply(p);
-      showCarnivalToast(`${p.name}: 🎲 LOADED DICE — ${ability.name}!`,ability.color);
-    } else {
-      // Pure random
-      ability=GAMBLER_ROLL_ABILITIES[Math.floor(Math.random()*GAMBLER_ROLL_ABILITIES.length)];
-      ability.apply(p);
-      showCarnivalToast(`${p.name}: 🃏 ${ability.name}!`,ability.color);
-    }
-
-    p.gamblerCDUntil=now+GAMBLER_CD_MS;
+  // ── POKER T2+: All In (replaces Wild Roll) ───────────
+  if(path==='poker'&&tier>=2){
+    triggerAllIn(p);
+    if(tier>=3) triggerDevilsHands(p); // T3: also swap cores
+    p.gamblerCDUntil=now+GAMBLER_ALL_IN_CD_MS;
+    return;
   }
+
+  // ── WILD ROLL (T0, Poker T1, Craps all tiers) ────────
+  p.gamblerPressCount=(p.gamblerPressCount||0)+1;
+  let cd=GAMBLER_CD_MS;
+
+  // Select ability
+  let ability;
+  if(path==='craps'&&tier>=3){
+    // Marked Deck: deterministic cycle
+    const idx=(p.gamblerCycleIndex||0)%GAMBLER_ROLL_ABILITIES.length;
+    ability=GAMBLER_ROLL_ABILITIES[idx];
+    p.gamblerCycleIndex=idx+1;
+  } else if(path==='craps'&&tier>=1&&p.gamblerPressCount%2===0){
+    // Loaded Dice: even press = locked ability
+    ability=GAMBLER_ROLL_ABILITIES[p.gamblerLockedAbility||0];
+  } else {
+    // Random
+    ability=GAMBLER_ROLL_ABILITIES[Math.floor(Math.random()*GAMBLER_ROLL_ABILITIES.length)];
+  }
+
+  // Apply with path modifiers
+  if(path==='craps'&&tier===2){
+    // Snake Eyes: 50% double trigger, 50% double CD
+    if(Math.random()<0.5){
+      ability.apply(p); ability.apply(p);
+      showCarnivalToast(`${p.name}: 🎲 SNAKE EYES — ${ability.name} ×2!`,ability.color);
+    } else {
+      cd*=2; ability.apply(p);
+      showCarnivalToast(`${p.name}: 🎲 BAD LUCK — ${ability.name} CD ×2`,'#ff4444');
+    }
+  } else if(path==='craps'&&tier>=3){
+    ability.apply(p);
+    const nextName=GAMBLER_ROLL_ABILITIES[(p.gamblerCycleIndex||0)%GAMBLER_ROLL_ABILITIES.length].name;
+    showCarnivalToast(`${p.name}: 🎲 ${ability.name} [→${nextName}]`,ability.color);
+  } else if(path==='craps'&&tier>=1&&p.gamblerPressCount%2===0){
+    ability.apply(p);
+    showCarnivalToast(`${p.name}: 🎲 LOADED DICE — ${ability.name}!`,ability.color);
+  } else {
+    ability.apply(p);
+    showCarnivalToast(`${p.name}: ${path==='poker'?'🃏':'🎲'} ${ability.name}!`,ability.color);
+  }
+
+  p.gamblerCDUntil=now+cd;
 }
  
 // ════════════════════════════════════════════════════════
@@ -2180,9 +2247,11 @@ function respawnPlayer(p){
   if(p.core && coreIs(p,'shadow')){ p.shadowVeilActive=false; p.shadowCDUntil=0; p.shadowSwapCDUntil=0; if(p.shadowClone){p.shadowClone.alive=false;p.shadowClone=null;} }
   if(p.core && coreIs(p,'gambler')){
     p.gamblerCDUntil=0; p.gamblerPressCount=0; p.gamblerCycleIndex=0;
-    p._gamblerLoanActive=false; p._gamblerForcedRollUntil=0;
+    p._gamblerLoanActive=false;
     clearTimeout(p._gamblerGhostTO); clearTimeout(p._gamblerLoanTO); clearTimeout(p._gamblerVeilTO);
   }
+  // Restore core if under Devil's Hands swap
+  if(p._devilsHandsSavedCore){ clearTimeout(p._devilsHandsRestoreTO); restoreDevilsHands(p); }
   // Time Core: clear loan and debt on respawn
   clearTimeout(p._timeLoanTimeout); p.timeLoanActive=false; p.timeLoanEnd=0;
   clearTimeout(p._timeDebtTimeout); p.timeDebtActive=false; p.timeDebtEnd=0;
@@ -2289,26 +2358,32 @@ function updateHUD(){
       const gbNow=Date.now();
       const gbCd=Math.max(0,Math.ceil(((p.gamblerCDUntil||0)-gbNow)/1000));
       const gbPath=p.gamblerPath||'poker';
+      const gbTier=gamblerTier(p);
       const gbIcon=gbPath==='poker'?'🃏':'🎲';
       if(gbCd>0) parts.push(`${gbIcon}CD ${gbCd}s`);
       else parts.push(`${gbIcon}READY`);
-      // Show next ability for Marked Deck (Poker tier 3)
-      if(gamblerTier(p)>=3&&gbPath==='poker'){
-        const next=GAMBLER_ROLL_ABILITIES[(p.gamblerCycleIndex||0)%GAMBLER_ROLL_ABILITIES.length];
-        parts.push(`→${next.name}`);
+      // Poker indicators
+      if(gbPath==='poker'){
+        if(gbTier>=1) parts.push('🪙CHIPS');                                           // Fake Chips passive
+        if(gbTier>=2&&gbCd>0) parts.push('⬛ALL IN');                                  // All In on CD
+        if(gbTier>=3&&gbCd>0) parts.push('😈DH');                                     // Devil's Hands ready next
       }
-      // Show locked ability for Loaded Dice (Poker tier 2)
-      if(gamblerTier(p)===2&&gbPath==='poker'){
-        const isEvenNext=((p.gamblerPressCount||0)+1)%2===0;
-        if(isEvenNext){const la=GAMBLER_ROLL_ABILITIES[p.gamblerLockedAbility||0];parts.push(`🔒${la.name}`);}
+      // Craps indicators
+      if(gbPath==='craps'){
+        if(gbTier>=1){                                                                  // Loaded Dice
+          const isEvenNext=((p.gamblerPressCount||0)+1)%2===0;
+          if(isEvenNext){const la=GAMBLER_ROLL_ABILITIES[p.gamblerLockedAbility||0];parts.push(`🔒${la.name}`);}
+        }
+        if(gbTier>=3){                                                                  // Marked Deck: show next
+          const next=GAMBLER_ROLL_ABILITIES[(p.gamblerCycleIndex||0)%GAMBLER_ROLL_ABILITIES.length];
+          parts.push(`→${next.name}`);
+        }
       }
-      // Fake Chips indicator
-      if(gamblerTier(p)>=1&&gbPath==='poker') parts.push('🪙CHIPS');
     }
-    // Devil's Hands hijack indicator (shown on affected players)
-    if((p._gamblerForcedRollUntil||0)>Date.now()){
-      const dhRem=Math.ceil((p._gamblerForcedRollUntil-Date.now())/1000);
-      parts.push(`😈HIJACKED ${dhRem}s`);
+    // Devil's Hands: show swap duration on affected players
+    if((p._devilsHandsUntil||0)>Date.now()){
+      const dhRem=Math.ceil((p._devilsHandsUntil-Date.now())/1000);
+      parts.push(`😈SWAPPED ${dhRem}s`);
     }
     // Shadow Core HUD
     if(hasShadowCore(p)){
@@ -2602,16 +2677,6 @@ window.addEventListener('keydown',e=>{
     const p=gameState.players[slot];
     if(!p||!p.alive||!p.core) return;
     if(!p._actionHoldStart) p._actionHoldStart=Date.now();
-    // Devil's Hands: this player's core is hijacked — force a random gambler roll
-    if(p._gamblerForcedRollUntil && Date.now()<p._gamblerForcedRollUntil){
-      if(Date.now()>=(p._coreSuppressedUntil||0) && Date.now()>=(p._gamblerHijackCDUntil||0)){
-        const forced=GAMBLER_ROLL_ABILITIES[Math.floor(Math.random()*GAMBLER_ROLL_ABILITIES.length)];
-        forced.apply(p);
-        p._gamblerHijackCDUntil=Date.now()+2000;
-        showCarnivalToast(`${p.name}: 😈 ${forced.name} (hijacked!)`,CORE_DEFS.gambler.color);
-      }
-      e.preventDefault(); return;
-    }
     // Ark Burst core suppression blocks all core activations
     if(Date.now()<(p._coreSuppressedUntil||0)){e.preventDefault();return;}
     if(p.core.id==='phase' && hasCorePhase(p)){
