@@ -112,6 +112,17 @@ body{background:var(--dark);color:#fff;font-family:'Segoe UI',sans-serif;min-hei
 .dash-chain-choice.selected{border-color:#00d2ff;color:#00d2ff;background:#03151a;}
 .dash-chain-choice small{display:block;color:#555;font-size:.62em;line-height:1.35;margin-top:4px;}
 .dash-chain-choice.selected small{color:#5f9cab;}
+.gambler-path-chooser{margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;}
+.gambler-path-choice{flex:1;min-width:150px;text-align:left;background:#0a0a0a;border:1px solid #2a2a2a;color:#777;border-radius:6px;padding:7px 8px;cursor:pointer;transition:all .15s;}
+.gambler-path-choice:hover{border-color:#4a4a4a;color:#bbb;}
+.gambler-path-choice.selected{border-color:#FFD700;color:#FFD700;background:#1a1500;}
+.gambler-path-choice small{display:block;color:#555;font-size:.62em;line-height:1.35;margin-top:4px;}
+.gambler-path-choice.selected small{color:#8a7200;}
+.gambler-lock-row{margin-top:6px;display:flex;align-items:center;gap:4px;flex-wrap:wrap;}
+.gambler-lock-label{font-size:.6em;color:#555;margin-right:2px;}
+.gambler-lock-btn{background:#0a0a0a;border:1px solid #2a2a2a;color:#555;border-radius:3px;padding:2px 5px;cursor:pointer;font-size:.58em;transition:all .12s;}
+.gambler-lock-btn:hover{border-color:#555;color:#bbb;}
+.gambler-lock-btn.selected{background:#1a1500;}
 
 /* SIDE BUFF GRID */
 #side-buff-panel{display:none;max-width:900px;width:100%;}
@@ -342,6 +353,19 @@ const SHADOW_SWAP_CD_MS     = 3000;   // 3s cooldown between shadow swaps
 const SHADOW_CLONE_SLOW_MS  = 3000;   // slow duration when enemy hits clone (tier 2)
 
 // ════════════════════════════════════════════════════════
+// GAMBLER CORE CONSTANTS
+// ════════════════════════════════════════════════════════
+const GAMBLER_CD_MS            = 8000;   // Wild Roll base cooldown
+const GAMBLER_ALL_IN_CD_MS     = 20000;  // All In cooldown (Craps tier 1)
+const GAMBLER_DEVILS_HANDS_MS  = 10000;  // Devil's Hands hijack duration (Craps tier 3)
+const GAMBLER_GHOST_MS         = 3000;   // Ghost Roll phase duration
+const GAMBLER_VEIL_MS          = 3000;   // Veil Roll shadow duration
+const GAMBLER_LOAN_MS          = 3000;   // Loan Roll speed boost duration
+const GAMBLER_PHANTOM_MS       = 8000;   // Phantom Roll summon lifetime
+const GAMBLER_FAKE_CHIPS_MULT  = 1.5;    // Fake Chips XP multiplier (Poker tier 1)
+const GAMBLER_FAKE_CHIPS_SKIP  = 2/3;    // Fake Chips growth-skip chance (Poker tier 1) — ⅔
+
+// ════════════════════════════════════════════════════════
 // TIME CORE CONSTANTS
 // ════════════════════════════════════════════════════════
 const TIME_LOAN_DURATION_BASE    = 9000;  // 9s active loan (between 8-10)
@@ -534,8 +558,26 @@ const CORE_DEFS = {
     xpPerApple:   4,
     xpPerKill:    40,
   },
+  gambler: {
+    id:    'gambler',
+    label: 'Gambler Core',
+    color: '#FFD700',
+    tiers: [
+      { name:'Wild Roll',
+        desc:'Press to trigger a random base ability (phase, shed, shot, ark, dash, phantom, loan, veil). 8s cooldown.' },
+      { name:'Pick a Path',
+        desc:'🃏 Poker – Fake Chips: XP gain ×1.5, but ⅔ chance apples give no body length. | 🎲 Craps – Loaded Dice: Every 2nd press fires your pre-chosen locked ability instead of random.' },
+      { name:'Double Down',
+        desc:'🃏 Poker – All In: Trigger all 9 abilities at once (20s CD). | 🎲 Craps – Snake Eyes: 50% ability triggers twice, 50% cooldown doubles.' },
+      { name:'Final Bet',
+        desc:'🃏 Poker – Devil\'s Hands: All In also physically rotates other players\' cores for 10 seconds. | 🎲 Craps – Marked Deck: Abilities cycle in a fixed order — HUD shows the next one.' },
+    ],
+    xpThresholds: [231, 371, 591],
+    xpPerApple:   4,
+    xpPerKill:    40,
+  },
 };
- 
+
 // ════════════════════════════════════════════════════════
 // SIDE BUFF DEFINITIONS — 8 buffs, pick 2 per player
 // Applied passively each game for the whole match.
@@ -604,6 +646,57 @@ const LENGTH_BUFF_EFFECTS = [
   (p)=>{ p._goldApples=(p._goldApples||0)+3; },                                  // gold apples
 ];
  
+// ════════════════════════════════════════════════════════
+// GAMBLER CORE — 8 Wild Roll abilities (one per other core)
+// These are called at runtime so forward refs (movePlayer, gameState) are safe.
+// ════════════════════════════════════════════════════════
+const GAMBLER_ROLL_ABILITIES = [
+  { name:'GHOST ROLL',   color:'#a020f0', apply(p){
+      p.ghost=true; p.phaseActive=true;
+      clearTimeout(p._gamblerGhostTO);
+      p._gamblerGhostTO=setTimeout(()=>{ if(p){p.ghost=false;if(!p.timeLoanActive)p.phaseActive=false;} }, GAMBLER_GHOST_MS);
+  }},
+  { name:'SHED ROLL',    color:'#c8a0ff', apply(p){
+      const c=Math.min(3,p.body.length-3);
+      for(let i=0;i<c;i++){const s=p.body.pop();if(s)p.shedTailPieces.push({x:s.x,y:s.y,timer:0,type:'normal'});}
+  }},
+  { name:'SHOT ROLL',    color:'#8ab4ff', apply(p){
+      if(gameState&&p.body.length&&(p.dx||p.dy))
+        gameState.bullets.push({x:p.body[0].x,y:p.body[0].y,dx:p.dx,dy:p.dy,ownerId:p.id,pierce:false,timeBullet:false});
+  }},
+  { name:'ARK ROLL',     color:'#FFD700', apply(p){
+      if(gameState)
+        gameState.slowZones.push({x:p.body[0].x,y:p.body[0].y,r:2,until:Date.now()+3500,ownerId:p.id,color:'#FFD700'});
+  }},
+  { name:'DASH ROLL',    color:'#00d2ff', apply(p){
+      p._isDashing=true; for(let i=0;i<3&&p.alive;i++) movePlayer(p); p._isDashing=false;
+  }},
+  { name:'PHANTOM ROLL', color:'#7fffd4', apply(p){
+      if(!gameState) return;
+      const alive=(p.splitSummons||[]).filter(s=>s.alive&&s._gamblerPhantom).length;
+      if(alive>=1) return;
+      const sl=Math.max(3,Math.floor(p.body.length/2));
+      (p.splitSummons=p.splitSummons||[]).push({
+        id:`gb-${p.id}-${Date.now()}`,type:'phantom',len:sl,
+        offset:6+(p.splitSummons.length*4),
+        body:p.body.slice(-sl).map(s=>({x:s.x,y:s.y})),
+        alive:true,_gamblerPhantom:true,gamblerExpiry:Date.now()+GAMBLER_PHANTOM_MS,
+      });
+  }},
+  { name:'LOAN ROLL',    color:'#ff9900', apply(p){
+      if(p._gamblerLoanActive) return;
+      p._gamblerLoanActive=true;
+      p.speed=Math.max(60,Math.floor(p.speed*0.5)); p.growCount+=3;
+      clearTimeout(p._gamblerLoanTO);
+      p._gamblerLoanTO=setTimeout(()=>{ if(p){p._gamblerLoanActive=false;if(!p.timeLoanActive)p.speed=BASE_SPEED;} }, GAMBLER_LOAN_MS);
+  }},
+  { name:'VEIL ROLL',    color:'#9966ff', apply(p){
+      p.shadowVeilActive=true;
+      clearTimeout(p._gamblerVeilTO);
+      p._gamblerVeilTO=setTimeout(()=>{ if(p)p.shadowVeilActive=false; }, GAMBLER_VEIL_MS);
+  }},
+];
+
 // Carnival abilities (same as before, apples look normal)
 const CARNIVAL_ABILITIES=[
   {name:'PHASE SHIFT',color:'#a020f0',apply(p){if(p.phaseActive)return;p.phaseActive=true;clearTimeout(p.phaseTimeout);p.phaseTimeout=setTimeout(()=>{p.phaseActive=false;},1500);}},
@@ -621,9 +714,9 @@ const CARNIVAL_ABILITIES=[
 // ════════════════════════════════════════════════════════
 let lobbyState={
   players:[
-    {active:true, name:'Player 1',color:'#00fbff',controls:'arrows',keys:{...PLAYER_DEFAULTS[0].keys},coreId:'phase',   buffIds:['echo_growth','gold_apple'],dashChainStyle:'chain'},
-    {active:false,name:'Player 2',color:'#ff00ff',controls:'wasd',  keys:{...PLAYER_DEFAULTS[1].keys},coreId:'shedding',buffIds:['dual_apple','molt'],dashChainStyle:'chain'},
-    {active:false,name:'Player 3',color:'#ffd700',controls:'uhjk',  keys:{...PLAYER_DEFAULTS[2].keys},coreId:'gun',     buffIds:['length_speed','echo_growth'],dashChainStyle:'chain'},
+    {active:true, name:'Player 1',color:'#00fbff',controls:'arrows',keys:{...PLAYER_DEFAULTS[0].keys},coreId:'phase',   buffIds:['echo_growth','gold_apple'],dashChainStyle:'chain',gamblerPath:'poker',gamblerLockedAbility:0},
+    {active:false,name:'Player 2',color:'#ff00ff',controls:'wasd',  keys:{...PLAYER_DEFAULTS[1].keys},coreId:'shedding',buffIds:['dual_apple','molt'],dashChainStyle:'chain',gamblerPath:'poker',gamblerLockedAbility:0},
+    {active:false,name:'Player 3',color:'#ffd700',controls:'uhjk',  keys:{...PLAYER_DEFAULTS[2].keys},coreId:'gun',     buffIds:['length_speed','echo_growth'],dashChainStyle:'chain',gamblerPath:'poker',gamblerLockedAbility:0},
   ],
   mode:'classic',
   winCondition:'longest',
@@ -812,10 +905,24 @@ function buildCorePanel(){
           <small>Dash twice consecutively. Second dash reduced, but strongest short burst.</small>
         </button>
         <button class="dash-chain-choice ${lp.dashChainStyle==='sbud'?'selected':''}" onclick="setDashChainStyle(${idx},'sbud')">
-          Super Better Uper Duper Chain Dash 
+          Super Better Uper Duper Chain Dash
           <small>Consecutive dashes decay each use. Around 3 dashes match regular Chain Dash distance.</small>
         </button>
       </div>
+    `:'';
+    const gPath=lp.gamblerPath||'poker', gLock=lp.gamblerLockedAbility||0;
+    const gamblerModeUI=lp.coreId==='gambler'?`
+      <div class="gambler-path-chooser">
+        <button class="gambler-path-choice ${gPath==='poker'?'selected':''}" onclick="setGamblerPath(${idx},'poker')">
+          🃏 Poker
+          <small>Fake Chips → Loaded Dice → Marked Deck. Higher XP, controlled rolls.</small>
+        </button>
+        <button class="gambler-path-choice ${gPath==='craps'?'selected':''}" onclick="setGamblerPath(${idx},'craps')">
+          🎲 Craps
+          <small>All In → Snake Eyes → Devil's Hands. High-variance chaos path.</small>
+        </button>
+      </div>
+      ${gPath==='poker'?`<div class="gambler-lock-row"><span class="gambler-lock-label">Loaded Dice lock:</span>${GAMBLER_ROLL_ABILITIES.map((ab,abi)=>`<button class="gambler-lock-btn ${gLock===abi?'selected':''}" style="color:${ab.color};border-color:${gLock===abi?ab.color:'#2a2a2a'}" onclick="setGamblerLockedAbility(${idx},${abi})">${ab.name}</button>`).join('')}</div>`:''}
     `:'';
     row.innerHTML=`
       <div class="core-player-name" style="color:${lp.color}">${lp.name}</div>
@@ -825,6 +932,7 @@ function buildCorePanel(){
           <div class="core-display-name" style="color:${def.color}">${def.label} <span class="core-display-key">[${actionKey}]</span></div>
           <div class="core-display-chain">${chain}</div>
           ${dashModeUI}
+          ${gamblerModeUI}
         </div>
         <button class="core-arrow" onclick="cycleCoreNext(${idx})">&#9654;</button>
       </div>`;
@@ -868,6 +976,20 @@ function setDashChainStyle(playerIdx, style){
   const p=lobbyState.players[playerIdx];
   if(!p) return;
   p.dashChainStyle=(style==='sbud')?'sbud':'chain';
+  buildLobby();
+}
+
+function setGamblerPath(playerIdx, path){
+  const p=lobbyState.players[playerIdx];
+  if(!p) return;
+  p.gamblerPath=(path==='craps')?'craps':'poker';
+  buildLobby();
+}
+
+function setGamblerLockedAbility(playerIdx, abilityIdx){
+  const p=lobbyState.players[playerIdx];
+  if(!p) return;
+  p.gamblerLockedAbility=Math.max(0,Math.min(GAMBLER_ROLL_ABILITIES.length-1,abilityIdx));
   buildLobby();
 }
  
@@ -1004,6 +1126,15 @@ function startGame(){
       dashChainUntil: 0,
       dashChainStyle: isRpg ? (lp.dashChainStyle||'chain') : 'chain',
       _coreSuppressedUntil: 0,
+      // Gambler Core runtime state
+      gamblerCDUntil: 0,
+      gamblerPath: isRpg ? (lp.gamblerPath||'poker') : 'poker',
+      gamblerLockedAbility: isRpg ? (lp.gamblerLockedAbility||0) : 0,
+      gamblerPressCount: 0,
+      gamblerCycleIndex: 0,
+      _gamblerLoanActive: false,
+      _devilsHandsSavedCore: null,   // Devil's Hands: original core saved during swap
+      _devilsHandsUntil: 0,          // Devil's Hands: when swap expires
       splitSummons: [],
       pathHistory: [],
       _actionHoldStart: 0,
@@ -1155,6 +1286,12 @@ function timeTier(p){ return coreIs(p,'time') ? p.core.tier : -1; }
 function hasShadowCore(p){ return coreAtLeast(p,'shadow',0); }
 function shadowTier(p){ return coreIs(p,'shadow') ? p.core.tier : -1; }
 
+// Gambler Core helpers
+function hasGamblerCore(p){ return coreAtLeast(p,'gambler',0); }
+function gamblerTier(p){ return coreIs(p,'gambler') ? p.core.tier : -1; }
+function gamblerIsPoker(p){ return coreIs(p,'gambler') && (p.gamblerPath||'poker')==='poker'; }
+function gamblerIsCraps(p){ return coreIs(p,'gambler') && (p.gamblerPath||'poker')==='craps'; }
+
 function getSplitMaxSummons(p){
   const t=splitTier(p);
   if(t<=0) return 1;
@@ -1206,6 +1343,12 @@ function recallHiveSummons(p){
 function updateSplitSummons(p){
   if(!p.core||!p.alive) return;
   if(!p.pathHistory) p.pathHistory=[];
+  // Expire and remove timed gambler summons (phantom + hive)
+  const nowSS=Date.now();
+  (p.splitSummons||[]).forEach(s=>{
+    if((s._gamblerPhantom||s._gamblerHive)&&s.gamblerExpiry&&nowSS>=s.gamblerExpiry) s.alive=false;
+  });
+  p.splitSummons=(p.splitSummons||[]).filter(s=>!((s._gamblerPhantom||s._gamblerHive)&&!s.alive));
   const head=p.body[0];
   p.pathHistory.unshift({x:head.x,y:head.y});
   if(p.pathHistory.length>420) p.pathHistory.length=420;
@@ -1496,6 +1639,148 @@ function zoneContainsCell(z,x,y){
   if(z.shape==='square') return dx<=z.r&&dy<=z.r;
   return dx<=z.r&&dy<=z.r;
 }
+
+// ════════════════════════════════════════════════════════
+// GAMBLER CORE
+// Poker:  T1=Fake Chips (passive)  T2=All In  T3=Devil's Hands
+// Craps:  T1=Loaded Dice  T2=Snake Eyes  T3=Marked Deck
+// ════════════════════════════════════════════════════════
+
+// Devil's Hands — physically rotates core IDs among other living players for 10s.
+function restoreDevilsHands(p){
+  if(!p._devilsHandsSavedCore) return;
+  p.core.id=p._devilsHandsSavedCore.id;
+  p.core.tier=p._devilsHandsSavedCore.tier;
+  p.core.xp=p._devilsHandsSavedCore.xp;
+  p._devilsHandsSavedCore=null;
+  p._devilsHandsUntil=0;
+}
+
+function triggerDevilsHands(caster){
+  const now=Date.now();
+  const targets=gameState.players.filter(p=>p!==caster&&p.alive&&p.core&&p.core.id!=='gambler');
+  if(targets.length<1){showCarnivalToast(`${caster.name}: 😈 DEVIL'S HANDS — no targets!`,CORE_DEFS.gambler.color);return;}
+  // Save originals (don't overwrite a live swap)
+  targets.forEach(p=>{
+    if(!p._devilsHandsSavedCore) p._devilsHandsSavedCore={id:p.core.id,tier:p.core.tier,xp:p.core.xp};
+  });
+  // Rotate core IDs: each player receives the next player's core (tier reset to 0)
+  const ids=targets.map(p=>p._devilsHandsSavedCore.id);
+  targets.forEach((p,i)=>{
+    p.core.id=ids[(i+1)%ids.length];
+    p.core.tier=0; p.core.xp=0;
+    p._devilsHandsUntil=now+GAMBLER_DEVILS_HANDS_MS;
+    // Prime the new core's cooldowns so it can fire immediately
+    if(p.core.id==='phase'){p.phaseCharges=1;p.phaseCD=false;p._phaseCDEnd=0;}
+    if(p.core.id==='ark') p.arkCDUntil=0;
+    if(p.core.id==='dash'){p.dashCDUntil=0;p.dashChainCount=0;}
+    if(p.core.id==='gun') p.gunCDUntil=0;
+    if(p.core.id==='shadow') p.shadowCDUntil=0;
+    clearTimeout(p._devilsHandsRestoreTO);
+    p._devilsHandsRestoreTO=setTimeout(()=>restoreDevilsHands(p),GAMBLER_DEVILS_HANDS_MS);
+  });
+  showCarnivalToast(`${caster.name}: 😈 DEVIL'S HANDS — ${targets.length} core(s) swapped for ${GAMBLER_DEVILS_HANDS_MS/1000}s!`,CORE_DEFS.gambler.color);
+}
+
+// All In — fires 9 specific abilities simultaneously.
+function triggerAllIn(p){
+  const now=Date.now();
+  // 1. Phase (Ghost Roll)
+  GAMBLER_ROLL_ABILITIES[0].apply(p);
+  // 2. Shed
+  GAMBLER_ROLL_ABILITIES[1].apply(p);
+  // 3. Shoot soul husk
+  GAMBLER_ROLL_ABILITIES[2].apply(p);
+  // 4. Ark pulse
+  GAMBLER_ROLL_ABILITIES[3].apply(p);
+  // 5. Dash
+  GAMBLER_ROLL_ABILITIES[4].apply(p);
+  // 6 & 7. Clear previous gambler summons, spawn phantom LEFT (idx 0) and hive RIGHT (idx 1)
+  p.splitSummons=(p.splitSummons||[]).filter(s=>!s._gamblerPhantom&&!s._gamblerHive);
+  // Phantom on LEFT side — follows player mirrored at sideCode=-1 (lane=2)
+  p.splitSummons.push({
+    id:`allin-ph-${p.id}-${now}`,type:'phantom',len:Math.max(3,p.body.length),offset:6,
+    body:p.body.map(s=>({x:s.x,y:s.y})),
+    alive:true,_gamblerPhantom:true,gamblerExpiry:now+GAMBLER_PHANTOM_MS,
+  });
+  // Hive clone on RIGHT side — costs half body length; sideCode=1 (lane=2)
+  const hiveLen=Math.max(3,Math.floor(p.body.length/2));
+  const hiveBodySrc=p.body.slice(-hiveLen).map(s=>({x:s.x,y:s.y}));
+  const removed=trimBodyKeepMin(p,hiveLen);
+  if(removed>=3){
+    p.splitSummons.push({
+      id:`allin-hv-${p.id}-${now}`,type:'hive',len:removed,offset:10,
+      body:hiveBodySrc,
+      alive:true,_gamblerHive:true,gamblerExpiry:now+GAMBLER_PHANTOM_MS,
+    });
+  }
+  // 8. Time loan (speed burst + growth)
+  GAMBLER_ROLL_ABILITIES[6].apply(p);
+  // 9. Shadow veil
+  GAMBLER_ROLL_ABILITIES[7].apply(p);
+  showCarnivalToast(`${p.name}: 🃏 ALL IN — 9 ABILITIES!`,CORE_DEFS.gambler.color);
+}
+
+function triggerGamblerCore(p){
+  if(!hasGamblerCore(p)||!p.alive) return;
+  const now=Date.now();
+  if(now<(p.gamblerCDUntil||0)) return;
+  if(now<(p._coreSuppressedUntil||0)) return;
+
+  const tier=gamblerTier(p);
+  const path=p.gamblerPath||'poker';
+
+  // ── POKER T2+: All In (replaces Wild Roll) ───────────
+  if(path==='poker'&&tier>=2){
+    triggerAllIn(p);
+    if(tier>=3) triggerDevilsHands(p); // T3: also swap cores
+    p.gamblerCDUntil=now+GAMBLER_ALL_IN_CD_MS;
+    return;
+  }
+
+  // ── WILD ROLL (T0, Poker T1, Craps all tiers) ────────
+  p.gamblerPressCount=(p.gamblerPressCount||0)+1;
+  let cd=GAMBLER_CD_MS;
+
+  // Select ability
+  let ability;
+  if(path==='craps'&&tier>=3){
+    // Marked Deck: deterministic cycle
+    const idx=(p.gamblerCycleIndex||0)%GAMBLER_ROLL_ABILITIES.length;
+    ability=GAMBLER_ROLL_ABILITIES[idx];
+    p.gamblerCycleIndex=idx+1;
+  } else if(path==='craps'&&tier>=1&&p.gamblerPressCount%2===0){
+    // Loaded Dice: even press = locked ability
+    ability=GAMBLER_ROLL_ABILITIES[p.gamblerLockedAbility||0];
+  } else {
+    // Random
+    ability=GAMBLER_ROLL_ABILITIES[Math.floor(Math.random()*GAMBLER_ROLL_ABILITIES.length)];
+  }
+
+  // Apply with path modifiers
+  if(path==='craps'&&tier===2){
+    // Snake Eyes: 50% double trigger, 50% double CD
+    if(Math.random()<0.5){
+      ability.apply(p); ability.apply(p);
+      showCarnivalToast(`${p.name}: 🎲 SNAKE EYES — ${ability.name} ×2!`,ability.color);
+    } else {
+      cd*=2; ability.apply(p);
+      showCarnivalToast(`${p.name}: 🎲 BAD LUCK — ${ability.name} CD ×2`,'#ff4444');
+    }
+  } else if(path==='craps'&&tier>=3){
+    ability.apply(p);
+    const nextName=GAMBLER_ROLL_ABILITIES[(p.gamblerCycleIndex||0)%GAMBLER_ROLL_ABILITIES.length].name;
+    showCarnivalToast(`${p.name}: 🎲 ${ability.name} [→${nextName}]`,ability.color);
+  } else if(path==='craps'&&tier>=1&&p.gamblerPressCount%2===0){
+    ability.apply(p);
+    showCarnivalToast(`${p.name}: 🎲 LOADED DICE — ${ability.name}!`,ability.color);
+  } else {
+    ability.apply(p);
+    showCarnivalToast(`${p.name}: ${path==='poker'?'🃏':'🎲'} ${ability.name}!`,ability.color);
+  }
+
+  p.gamblerCDUntil=now+cd;
+}
  
 // ════════════════════════════════════════════════════════
 // GAME LOOP
@@ -1744,6 +2029,8 @@ function collectApple(p,a){
   // Time Core: double growth during loan; 50% chance no growth during debt
   if(p.timeLoanActive) grow*=2;
   if(p.timeDebtActive&&Math.random()<0.5) grow=0;
+  // Fake Chips (Gambler Poker tier 1): 35% chance apple gives no body growth
+  if(gamblerIsPoker(p)&&gamblerTier(p)>=1&&Math.random()<GAMBLER_FAKE_CHIPS_SKIP) grow=0;
   p.growCount+=grow;
   p.applesEaten++;
   if(rpg&&rpg.phaseCharge&&p.phaseCD)reducePhaseCooldown(p,0.5);
@@ -1788,6 +2075,8 @@ function collectApple(p,a){
     let xpGain=def.xpPerApple;
     if(hasBuff(p,'gold_apple'))  xpGain*=1.25;
     if(hasBuff(p,'xp_boost'))    xpGain*=1.15;
+    // Fake Chips (Gambler Poker tier 1): XP ×1.5
+    if(gamblerIsPoker(p)&&gamblerTier(p)>=1) xpGain*=GAMBLER_FAKE_CHIPS_MULT;
     addCoreXP(p, Math.ceil(xpGain));
   }
 }
@@ -1956,6 +2245,13 @@ function respawnPlayer(p){
   if(p.core && coreIs(p,'ark')){ p.arkCDUntil=0; p._coreSuppressedUntil=0; }
   if(p.core && coreIs(p,'dash')){ p.dashCDUntil=0; p.dashChainCount=0; p.dashChainUntil=0; }
   if(p.core && coreIs(p,'shadow')){ p.shadowVeilActive=false; p.shadowCDUntil=0; p.shadowSwapCDUntil=0; if(p.shadowClone){p.shadowClone.alive=false;p.shadowClone=null;} }
+  if(p.core && coreIs(p,'gambler')){
+    p.gamblerCDUntil=0; p.gamblerPressCount=0; p.gamblerCycleIndex=0;
+    p._gamblerLoanActive=false;
+    clearTimeout(p._gamblerGhostTO); clearTimeout(p._gamblerLoanTO); clearTimeout(p._gamblerVeilTO);
+  }
+  // Restore core if under Devil's Hands swap
+  if(p._devilsHandsSavedCore){ clearTimeout(p._devilsHandsRestoreTO); restoreDevilsHands(p); }
   // Time Core: clear loan and debt on respawn
   clearTimeout(p._timeLoanTimeout); p.timeLoanActive=false; p.timeLoanEnd=0;
   clearTimeout(p._timeDebtTimeout); p.timeDebtActive=false; p.timeDebtEnd=0;
@@ -2056,6 +2352,38 @@ function updateHUD(){
     if(!hasTimeCore(p)&&p.timeDebtActive){
       const rem=Math.max(0,Math.ceil((p.timeDebtEnd-Date.now())/1000));
       parts.push(`💸DEBT ${rem}s`);
+    }
+    // Gambler Core HUD
+    if(hasGamblerCore(p)){
+      const gbNow=Date.now();
+      const gbCd=Math.max(0,Math.ceil(((p.gamblerCDUntil||0)-gbNow)/1000));
+      const gbPath=p.gamblerPath||'poker';
+      const gbTier=gamblerTier(p);
+      const gbIcon=gbPath==='poker'?'🃏':'🎲';
+      if(gbCd>0) parts.push(`${gbIcon}CD ${gbCd}s`);
+      else parts.push(`${gbIcon}READY`);
+      // Poker indicators
+      if(gbPath==='poker'){
+        if(gbTier>=1) parts.push('🪙CHIPS');                                           // Fake Chips passive
+        if(gbTier>=2&&gbCd>0) parts.push('⬛ALL IN');                                  // All In on CD
+        if(gbTier>=3&&gbCd>0) parts.push('😈DH');                                     // Devil's Hands ready next
+      }
+      // Craps indicators
+      if(gbPath==='craps'){
+        if(gbTier>=1){                                                                  // Loaded Dice
+          const isEvenNext=((p.gamblerPressCount||0)+1)%2===0;
+          if(isEvenNext){const la=GAMBLER_ROLL_ABILITIES[p.gamblerLockedAbility||0];parts.push(`🔒${la.name}`);}
+        }
+        if(gbTier>=3){                                                                  // Marked Deck: show next
+          const next=GAMBLER_ROLL_ABILITIES[(p.gamblerCycleIndex||0)%GAMBLER_ROLL_ABILITIES.length];
+          parts.push(`→${next.name}`);
+        }
+      }
+    }
+    // Devil's Hands: show swap duration on affected players
+    if((p._devilsHandsUntil||0)>Date.now()){
+      const dhRem=Math.ceil((p._devilsHandsUntil-Date.now())/1000);
+      parts.push(`😈SWAPPED ${dhRem}s`);
     }
     // Shadow Core HUD
     if(hasShadowCore(p)){
@@ -2384,6 +2712,9 @@ window.addEventListener('keydown',e=>{
       e.preventDefault();
     } else if(p.core.id==='shadow'){
       triggerShadowCore(p);
+      e.preventDefault();
+    } else if(p.core.id==='gambler'){
+      triggerGamblerCore(p);
       e.preventDefault();
     }
   });
